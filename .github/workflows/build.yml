@@ -1,69 +1,174 @@
 name: Build APK
-
 on:
   workflow_dispatch:
     inputs:
       with_engine:
-        description: "Build the Source engine into the APK"
+        description: "Build the Source engine into the APK (long)"
         type: boolean
         default: true
-
 jobs:
   apk:
     runs-on: ubuntu-24.04
-
     steps:
-
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-
-      # ============================================================
-      # UNPACK SOURCEDROID PROJECT
-      # ============================================================
-
+      - uses: actions/checkout@v4
       - name: Unpack project
         run: |
-          set -e
-
           check() {
             f="chunks/part$1.txt"
-
-            if [ ! -f "$f" ]; then
-              echo "ERROR: file $f is missing"
-              exit 1
-            fi
-
+            [ -f "$f" ] || { echo "ERROR: file $f is missing"; exit 1; }
             h=$(tr -d ' \r\n\t' < "$f" | sha256sum | cut -d' ' -f1)
-
-            if [ "$h" != "$2" ]; then
-              echo "ERROR: file $f is damaged or incomplete"
-              exit 1
-            fi
+            [ "$h" = "$2" ] || { echo "ERROR: file $f is damaged or incomplete, create it again"; exit 1; }
           }
-
           check 1 ec02df5874855ae519eeafea7dfa51a2f2daf384b692bf1fa3062d5c528b8156
           check 2 7e60bf90484b4aa4fa521e04fad17a82ce2a66a6f81aeb8174dbc3c54130a128
           check 3 22766befe8b5b26b90b1abef345dbd9e3af6e169a06c50773d4cd73896c18d7a
-
-          mkdir -p project
-
+          mkdir project
           cat chunks/part*.txt | base64 -d | tar xJ -C project
-
-
-      # ============================================================
-      # ANDROID ACTIVITY + FONTS
-      # ============================================================
-
-      - name: Patch Android activity and fonts
+      - name: Patch engine activity and add fonts
         working-directory: project
         run: |
-          set -e
+          cat > app/src/engine/java/com/valvesoftware/ValveActivity2.java <<'JAVA_EOF'
+          package com.valvesoftware;
 
-          mkdir -p app/src/engine/java/com/valvesoftware
+          import android.content.res.AssetManager;
+          import android.os.Bundle;
 
-          cat > app/src/engine/java/com/valvesoftware/ValveActivity
+          import org.libsdl.app.SDLActivity;
+
+          import java.io.BufferedReader;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.util.ArrayList;
+          import java.util.List;
+
+          /**
+           * Host activity for the nillerusr/source-engine Android port.
+           *
+           * The class name and the native methods are fixed by the engine (launcher/android/main.cpp).
+           * Env vars the engine reads: VALVE_GAME_PATH (game root), APP_LIB_PATH (native libs),
+           * APP_DATA_PATH (fonts are read from $APP_DATA_PATH/files/*.ttf).
+           */
+          public class ValveActivity2 extends SDLActivity {
+              private static native int setenv(String name, String value, int overwrite);
+              private static native void setArgs(String args);
+              public static native void nativeOnActivityResult(Object activity, int req, int res, Object data);
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  copyFonts();
+                  super.onCreate(savedInstanceState);
+                  String root = getIntent().getStringExtra("root");
+                  String[] args = getIntent().getStringArrayExtra("args");
+                  if (root == null) root = "";
+                  StringBuilder sb = new StringBuilder();
+                  if (args != null) for (String a : args) sb.append(a).append(' ');
+
+                  File files = getFilesDir();
+                  setenv("VALVE_GAME_PATH", root, 1);
+                  setenv("APP_DATA_PATH", files.getParent(), 1);
+                  setenv("APP_LIB_PATH", getApplicationInfo().nativeLibraryDir, 1);
+                  setenv("TMPDIR", getCacheDir().getAbsolutePath(), 1);
+                  setArgs(sb.toString().trim());
+              }
+
+              /** Copies assets/fonts/* into <app files dir>, where the engine looks for them. */
+              private void copyFonts() {
+                  try {
+                      AssetManager am = getAssets();
+                      String[] names = am.list("fonts");
+                      if (names == null) return;
+                      File dir = getFilesDir();
+                      for (String n : names) {
+                          File out = new File(dir, n);
+                          if (out.exists() && out.length() > 0) continue;
+                          try (InputStream in = am.open("fonts/" + n); OutputStream o = new FileOutputStream(out)) {
+                              byte[] buf = new byte[16384];
+                              int r;
+                              while ((r = in.read(buf)) > 0) o.write(buf, 0, r);
+                          }
+                      }
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              @Override
+              protected String[] getLibraries() {
+                  List<String> libs = new ArrayList<>();
+                  try {
+                      BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open("engine_libs.txt")));
+                      String line;
+                      while ((line = r.readLine()) != null) {
+                          line = line.trim();
+                          if (!line.isEmpty()) libs.add(line);
+                      }
+                      r.close();
+                  } catch (Exception e) {
+                      libs.clear();
+                      libs.add("SDL2");
+                      libs.add("launcher");
+                  }
+                  return libs.toArray(new String[0]);
+              }
+
+              @Override
+              protected String getMainFunction() {
+                  return "LauncherMainAndroid";
+              }
+          }
+          JAVA_EOF
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra fonts-liberation fonts-droid-fallback
+          mkdir -p app/src/main/assets/fonts
+          for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/truetype/dejavu/DejaVuSans-*.ttf; do
+            cp "$f" "app/src/main/assets/fonts/$(basename "$f" | tr 'A-Z' 'a-z')"
+          done
+          cp /usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf app/src/main/assets/fonts/
+          cp /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf app/src/main/assets/fonts/DroidSansFallback.ttf || true
+          ls -la app/src/main/assets/fonts
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Cache engine build
+        if: ${{ inputs.with_engine }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            project/engine
+            project/.ndk
+          key: engine-cache-v1
+      - name: Build engine
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: bash scripts/build_engine.sh
+      - name: Disable SDL HIDAPI (its native library is not built)
+        working-directory: project
+        run: |
+          F=engine/thirdparty/SDL-src/android-project/app/src/main/java/org/libsdl/app/HIDDeviceManager.java
+          sed -i 's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' "$F"
+          grep -n "if (true) return null" "$F"
+      - name: Strip debug symbols from engine libraries
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          STRIP=$(find .ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-strip' | head -1)
+          echo "strip tool: $STRIP"
+          du -sh app/src/main/jniLibs
+          find app/src/main/jniLibs -name '*.so' -exec "$STRIP" --strip-unneeded {} \;
+          du -sh app/src/main/jniLibs
+      - name: Build APK
+        working-directory: project
+        run: |
+          sed -i '/^android {/a\    lint { checkReleaseBuilds = false; abortOnError = false }' app/build.gradle.kts
+          gradle assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SourceDroid-apk
+          path: project/app/build/outputs/apk/release/*.apk
+          
