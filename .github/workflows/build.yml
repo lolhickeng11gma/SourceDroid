@@ -72,7 +72,7 @@ jobs:
           G6sLv92+urC2XNApAqLQN+sBiiNPisR3bDff1yGLUuAkTN9sIVbCbCDNhfPnNXGRjXJ9dUV6Dd0RNaFIPCwy9BIHfdPFKv3WW30P
           850/ZhwSOy6znyPINO4HyKl1uewQUvnO13R06D5GWOh/C9Z6WuwH+Qz3rLOnsNwxYGVRZJozGyrKgWLoq2um0xK+UZqFFSV0A6YF
           NjjABSlNV5+pnmeJb5zerrQut43SJA5JxkBUivNhMtjzshikARmKumhKC4juxT2MxS+A1du9SCVbmD5076h3+Vn4Bv+IY075IqMl
-          OkyaWgLyoN30qKbQ5pRyrgnLbjX6I3Ji8j+d6KhU4lzU80FHKenUnD598FgBSRyRKqoX/8PDXepU6ykOdvF8NhmXW5AuuwYspB10
+          OkyaWgLyoN30qKbQ5pRyrgnLbjX6I3Ji8j+d6KhU4lzU80FHKenUnD598FgBSRyRKqoX/8PDXepU6ykOdvF8NhmXspB10
           5705c7JRIIQequZr9JRW+cLiFr4Lt7ZwdeH95e2FjY3thdXV7Ssrq8uV7YXFxeVKZXtjeXNtpYLL1SI6bFAM6Qsjr+vO5Z/fQqPX
           3/B1v4Pwlbashn2xXh8XFuzszgeFONWk4yGYc4dHJzIyz0wg6y2sh4BO9vIrykMSs/xvj7A66lxdeAwkFHDmZAcDUzhsOvwkCqJx
           v9hw+63z1Vvm7CDL1Dz4Rqv8Ye9515e2PpogTrdHAtvxrPZQWJkCz9O5KzrVhYYMhqrOkdMhtcP0UUd9XM7YdWBNFNYMi0w0bR84
@@ -190,4 +190,64 @@ jobs:
           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
-          e3s8g6nivU5BoFmo6ffa3pbM2RnMWjvu/qbvDFqP9Y+3vVbL7T32Bx6tAKPdY8l
+          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
+          B64
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Build engine
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: bash scripts/build_engine.sh
+      - name: Build APK
+        working-directory: project
+        run: gradle assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SourceDroid-apk
+          path: project/app/build/outputs/apk/release/*.apk
