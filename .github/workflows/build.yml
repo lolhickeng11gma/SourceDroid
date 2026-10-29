@@ -147,6 +147,12 @@ jobs:
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: bash scripts/build_engine.sh
+      - name: Disable SDL HIDAPI (its native library is not built)
+        working-directory: project
+        run: |
+          F=engine/thirdparty/SDL-src/android-project/app/src/main/java/org/libsdl/app/HIDDeviceManager.java
+          sed -i 's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' "$F"
+          grep -n "if (true) return null" "$F"
       - name: Strip debug symbols from engine libraries
         if: ${{ inputs.with_engine }}
         working-directory: project
