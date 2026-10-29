@@ -1,32 +1,56 @@
 name: Build APK
+
 on:
   workflow_dispatch:
     inputs:
       with_engine:
-        description: "Build the Source engine into the APK (long)"
+        description: "Build the Source engine into the APK"
         type: boolean
         default: true
+
 jobs:
   apk:
     runs-on: ubuntu-24.04
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Unpack project
         run: |
+          set -e
+
           check() {
             f="chunks/part$1.txt"
-            [ -f "$f" ] || { echo "ERROR: file $f is missing"; exit 1; }
+            [ -f "$f" ] || {
+              echo "ERROR: file $f is missing"
+              exit 1
+            }
+
             h=$(tr -d ' \r\n\t' < "$f" | sha256sum | cut -d' ' -f1)
-            [ "$h" = "$2" ] || { echo "ERROR: file $f is damaged or incomplete, create it again"; exit 1; }
+
+            [ "$h" = "$2" ] || {
+              echo "ERROR: file $f is damaged or incomplete"
+              exit 1
+            }
           }
+
           check 1 ec02df5874855ae519eeafea7dfa51a2f2daf384b692bf1fa3062d5c528b8156
           check 2 7e60bf90484b4aa4fa521e04fad17a82ce2a66a6f81aeb8174dbc3c54130a128
           check 3 22766befe8b5b26b90b1abef345dbd9e3af6e169a06c50773d4cd73896c18d7a
+
           mkdir project
           cat chunks/part*.txt | base64 -d | tar xJ -C project
-      - name: Patch engine activity and add fonts
+
+      # ------------------------------------------------------------
+      # Android activity + fonts
+      # ------------------------------------------------------------
+
+      - name: Patch Android activity and fonts
         working-directory: project
         run: |
+          set -e
+
           cat > app/src/engine/java/com/valvesoftware/ValveActivity2.java <<'JAVA_EOF'
           package com.valvesoftware;
 
@@ -44,72 +68,146 @@ jobs:
           import java.util.ArrayList;
           import java.util.List;
 
-          /**
-           * Host activity for the nillerusr/source-engine Android port.
-           *
-           * The class name and the native methods are fixed by the engine (launcher/android/main.cpp).
-           * Env vars the engine reads: VALVE_GAME_PATH (game root), APP_LIB_PATH (native libs),
-           * APP_DATA_PATH (fonts are read from $APP_DATA_PATH/files/*.ttf).
-           */
           public class ValveActivity2 extends SDLActivity {
-              private static native int setenv(String name, String value, int overwrite);
+
+              private static native int setenv(
+                      String name,
+                      String value,
+                      int overwrite
+              );
+
               private static native void setArgs(String args);
-              public static native void nativeOnActivityResult(Object activity, int req, int res, Object data);
+
+              public static native void nativeOnActivityResult(
+                      Object activity,
+                      int req,
+                      int res,
+                      Object data
+              );
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
+
                   copyFonts();
+
                   super.onCreate(savedInstanceState);
+
                   String root = getIntent().getStringExtra("root");
                   String[] args = getIntent().getStringArrayExtra("args");
-                  if (root == null) root = "";
+
+                  if (root == null)
+                      root = "";
+
                   StringBuilder sb = new StringBuilder();
-                  if (args != null) for (String a : args) sb.append(a).append(' ');
+
+                  if (args != null) {
+                      for (String a : args) {
+                          sb.append(a).append(' ');
+                      }
+                  }
+
+                  /*
+                   * Mobile-safe Source settings.
+                   *
+                   * These are intentionally added after the supplied
+                   * arguments so the engine starts with reduced texture
+                   * memory usage on Android.
+                   */
+                  sb.append("+mat_picmip 2 ");
+                  sb.append("+mat_reducefillrate 1 ");
+                  sb.append("+mat_filtertextures 1 ");
 
                   File files = getFilesDir();
+
                   setenv("VALVE_GAME_PATH", root, 1);
                   setenv("APP_DATA_PATH", files.getParent(), 1);
-                  setenv("APP_LIB_PATH", getApplicationInfo().nativeLibraryDir, 1);
-                  setenv("TMPDIR", getCacheDir().getAbsolutePath(), 1);
+                  setenv(
+                      "APP_LIB_PATH",
+                      getApplicationInfo().nativeLibraryDir,
+                      1
+                  );
+                  setenv(
+                      "TMPDIR",
+                      getCacheDir().getAbsolutePath(),
+                      1
+                  );
+
                   setArgs(sb.toString().trim());
               }
 
-              /** Copies assets/fonts/* into <app files dir>, where the engine looks for them. */
               private void copyFonts() {
                   try {
                       AssetManager am = getAssets();
+
                       String[] names = am.list("fonts");
-                      if (names == null) return;
+
+                      if (names == null)
+                          return;
+
                       File dir = getFilesDir();
+
                       for (String n : names) {
+
                           File out = new File(dir, n);
-                          if (out.exists() && out.length() > 0) continue;
-                          try (InputStream in = am.open("fonts/" + n); OutputStream o = new FileOutputStream(out)) {
+
+                          if (out.exists() && out.length() > 0)
+                              continue;
+
+                          try (
+                              InputStream in =
+                                  am.open("fonts/" + n);
+                              OutputStream o =
+                                  new FileOutputStream(out)
+                          ) {
+
                               byte[] buf = new byte[16384];
+
                               int r;
-                              while ((r = in.read(buf)) > 0) o.write(buf, 0, r);
+
+                              while ((r = in.read(buf)) > 0) {
+                                  o.write(buf, 0, r);
+                              }
                           }
                       }
+
                   } catch (Exception ignored) {
                   }
               }
 
               @Override
               protected String[] getLibraries() {
+
                   List<String> libs = new ArrayList<>();
+
                   try {
-                      BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open("engine_libs.txt")));
+
+                      BufferedReader r =
+                          new BufferedReader(
+                              new InputStreamReader(
+                                  getAssets().open("engine_libs.txt")
+                              )
+                          );
+
                       String line;
+
                       while ((line = r.readLine()) != null) {
+
                           line = line.trim();
-                          if (!line.isEmpty()) libs.add(line);
+
+                          if (!line.isEmpty())
+                              libs.add(line);
                       }
+
                       r.close();
+
                   } catch (Exception e) {
+
                       libs.clear();
+
                       libs.add("SDL2");
                       libs.add("launcher");
                   }
+
                   return libs.toArray(new String[0]);
               }
 
@@ -119,56 +217,358 @@ jobs:
               }
           }
           JAVA_EOF
+
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra fonts-liberation fonts-droid-fallback
+
+          sudo apt-get install -y -qq \
+            fonts-dejavu-core \
+            fonts-dejavu-extra \
+            fonts-liberation \
+            fonts-droid-fallback
+
           mkdir -p app/src/main/assets/fonts
-          for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/truetype/dejavu/DejaVuSans-*.ttf; do
-            cp "$f" "app/src/main/assets/fonts/$(basename "$f" | tr 'A-Z' 'a-z')"
+
+          for f in \
+            /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+            /usr/share/fonts/truetype/dejavu/DejaVuSans-*.ttf
+          do
+            cp "$f" \
+              "app/src/main/assets/fonts/$(basename "$f" | tr 'A-Z' 'a-z')"
           done
-          cp /usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf app/src/main/assets/fonts/
-          cp /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf app/src/main/assets/fonts/DroidSansFallback.ttf || true
+
+          cp \
+            /usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf \
+            app/src/main/assets/fonts/
+
+          cp \
+            /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf \
+            app/src/main/assets/fonts/DroidSansFallback.ttf \
+            || true
+
           ls -la app/src/main/assets/fonts
-      - uses: actions/setup-java@v4
+
+      # ------------------------------------------------------------
+      # IMPORTANT:
+      # Force Source Engine itself to AArch64.
+      # ------------------------------------------------------------
+
+      - name: Patch Source Engine for ARM64
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          set -e
+
+          echo "Searching Source Engine build scripts..."
+
+          find . \
+            -type f \
+            \( -name "*.sh" -o -name "*.py" -o -name "*.txt" \) \
+            -print0 |
+          xargs -0 grep -Il "armeabi-v7a-hard" |
+          while read -r file
+          do
+            echo "Patching: $file"
+
+            sed -i \
+              's/armeabi-v7a-hard/aarch64/g' \
+              "$file"
+          done
+
+          echo
+          echo "Remaining ARMv7 references:"
+          grep -R \
+            "armeabi-v7a-hard" \
+            scripts \
+            engine \
+            2>/dev/null \
+            || true
+
+          echo
+          echo "AArch64 references:"
+          grep -R \
+            "aarch64" \
+            scripts \
+            2>/dev/null \
+            | head -50 \
+            || true
+
+      # ------------------------------------------------------------
+      # Java / Gradle
+      # ------------------------------------------------------------
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Cache engine build
+
+      # ------------------------------------------------------------
+      # DO NOT reuse the old ARMv7 engine cache.
+      # ------------------------------------------------------------
+
+      - name: Cache ARM64 engine build
         if: ${{ inputs.with_engine }}
         uses: actions/cache@v4
         with:
           path: |
             project/engine
             project/.ndk
-          key: engine-cache-v1
-      - name: Build engine
+          key: sourcedroid-engine-arm64-v2-${{ runner.os }}-${{ github.sha }}
+
+      # ------------------------------------------------------------
+      # Build Source Engine
+      # ------------------------------------------------------------
+
+      - name: Build ARM64 Source Engine
         if: ${{ inputs.with_engine }}
         working-directory: project
-        run: bash scripts/build_engine.sh
-      - name: Disable SDL HIDAPI (its native library is not built)
+        env:
+          ANDROID_ABI: arm64-v8a
+          ANDROID_ARCH: aarch64
+          ANDROID_PLATFORM: android-21
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "Building Source Engine for ARM64"
+          echo "Architecture: aarch64"
+          echo "Android ABI: arm64-v8a"
+          echo "API: 21"
+          echo "========================================"
+
+          bash scripts/build_engine.sh
+
+      # ------------------------------------------------------------
+      # Disable SDL HIDAPI because SourceDroid does not build it.
+      # ------------------------------------------------------------
+
+      - name: Disable SDL HIDAPI
         working-directory: project
         run: |
+          set -e
+
           F=engine/thirdparty/SDL-src/android-project/app/src/main/java/org/libsdl/app/HIDDeviceManager.java
-          sed -i 's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' "$F"
-          grep -n "if (true) return null" "$F"
-      - name: Strip debug symbols from engine libraries
+
+          if [ -f "$F" ]; then
+
+            sed -i \
+              's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' \
+              "$F"
+
+            grep -n \
+              "if (true) return null" \
+              "$F" \
+              || true
+
+          fi
+
+      # ------------------------------------------------------------
+      # Make sure ARM64 native libraries are actually present.
+      # ------------------------------------------------------------
+
+      - name: Verify ARM64 libraries
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: |
-          STRIP=$(find .ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-strip' | head -1)
-          echo "strip tool: $STRIP"
-          du -sh app/src/main/jniLibs
-          find app/src/main/jniLibs -name '*.so' -exec "$STRIP" --strip-unneeded {} \;
-          du -sh app/src/main/jniLibs
+          set -e
+
+          echo "Native libraries:"
+          find app/src/main/jniLibs \
+            -type f \
+            -name "*.so" \
+            -print \
+            | sort
+
+          echo
+          echo "ARM64 libraries:"
+          find app/src/main/jniLibs \
+            -path "*arm64-v8a*" \
+            -name "*.so" \
+            -print \
+            | sort
+
+          ARM64_COUNT=$(
+            find app/src/main/jniLibs \
+              -path "*arm64-v8a*" \
+              -name "*.so" \
+              | wc -l
+          )
+
+          echo "ARM64 library count: $ARM64_COUNT"
+
+          if [ "$ARM64_COUNT" -eq 0 ]; then
+            echo ""
+            echo "ERROR:"
+            echo "The engine did not produce arm64-v8a libraries."
+            echo "The build is still producing ARMv7 libraries."
+            exit 1
+          fi
+
+      # ------------------------------------------------------------
+      # Strip ARM64 symbols.
+      # ------------------------------------------------------------
+
+      - name: Strip ARM64 libraries
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          set -e
+
+          echo "Locating ARM64 strip..."
+
+          STRIP=$(
+            find .ndk \
+              -type f \
+              \( \
+                -name "aarch64-linux-android-strip" \
+                -o \
+                -name "llvm-strip" \
+              \) \
+              | head -1
+          )
+
+          if [ -z "$STRIP" ]; then
+            echo "ARM64 strip executable not found."
+            echo "Using system llvm-strip."
+
+            STRIP=$(command -v llvm-strip || true)
+          fi
+
+          if [ -z "$STRIP" ]; then
+            echo "ERROR: no strip tool available."
+            exit 1
+          fi
+
+          echo "Using strip: $STRIP"
+
+          find app/src/main/jniLibs/arm64-v8a \
+            -name "*.so" \
+            -exec "$STRIP" --strip-unneeded {} \;
+
+          echo
+          echo "ARM64 libraries after stripping:"
+
+          find app/src/main/jniLibs/arm64-v8a \
+            -name "*.so" \
+            -exec file {} \;
+
+      # ------------------------------------------------------------
+      # Force Android packaging to ARM64 only.
+      # ------------------------------------------------------------
+
+      - name: Configure Gradle for ARM64
+        working-directory: project
+        run: |
+          set -e
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("app/build.gradle.kts")
+
+          if not p.exists():
+              print("WARNING: app/build.gradle.kts not found")
+              raise SystemExit(0)
+
+          s = p.read_text()
+
+          marker = "ndk {"
+
+          if "abiFilters" not in s:
+
+              if "defaultConfig {" in s:
+
+                  s = s.replace(
+                      "defaultConfig {",
+                      """defaultConfig {
+                  ndk {
+                      abiFilters += listOf("arm64-v8a")
+                  }""",
+                      1
+                  )
+
+          p.write_text(s)
+
+          print("Gradle ARM64 configuration applied.")
+          PY
+
+          echo
+          grep -n \
+            -A5 \
+            -B2 \
+            "abiFilters" \
+            app/build.gradle.kts \
+            || true
+
+      # ------------------------------------------------------------
+      # Build APK
+      # ------------------------------------------------------------
+
       - name: Build APK
         working-directory: project
         run: |
-          sed -i '/^android {/a\    lint { checkReleaseBuilds = false; abortOnError = false }' app/build.gradle.kts
+          set -e
+
+          sed -i \
+            '/^android {/a\
+                lint { checkReleaseBuilds = false; abortOnError = false }' \
+            app/build.gradle.kts
+
           gradle assembleRelease --no-daemon
-      - uses: actions/upload-artifact@v4
+
+      # ------------------------------------------------------------
+      # Verify APK
+      # ------------------------------------------------------------
+
+      - name: Verify APK architecture
+        working-directory: project
+        run: |
+          set -e
+
+          APK=$(find \
+            app/build/outputs/apk/release \
+            -name "*.apk" \
+            | head -1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not produced."
+            exit 1
+          fi
+
+          echo "APK:"
+          echo "$APK"
+
+          echo
+          echo "Checking APK native libraries..."
+
+          unzip -l "$APK" \
+            | grep "lib/arm64-v8a/" \
+            | head -50
+
+          if ! unzip -l "$APK" \
+              | grep -q "lib/arm64-v8a/"; then
+
+            echo ""
+            echo "ERROR:"
+            echo "APK does not contain arm64-v8a libraries."
+
+            exit 1
+          fi
+
+          echo ""
+          echo "ARM64 APK verified successfully."
+
+      # ------------------------------------------------------------
+      # Upload APK
+      # ------------------------------------------------------------
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: SourceDroid-apk
+          name: SourceDroid-arm64
           path: project/app/build/outputs/apk/release/*.apk
-          
