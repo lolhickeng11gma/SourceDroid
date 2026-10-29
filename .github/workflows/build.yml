@@ -24,6 +24,17 @@ jobs:
           check 3 22766befe8b5b26b90b1abef345dbd9e3af6e169a06c50773d4cd73896c18d7a
           mkdir project
           cat chunks/part*.txt | base64 -d | tar xJ -C project
+      - name: Show build files (diagnostic)
+        working-directory: project
+        run: |
+          echo "===== scripts/build_engine.sh ====="
+          cat scripts/build_engine.sh
+          echo "===== app/build.gradle.kts ====="
+          cat app/build.gradle.kts
+          echo "===== ABI mentions ====="
+          grep -rn "armeabi\|arm-linux\|arm64\|aarch64\|APP_ABI\|abiFilters" scripts app --include=*.sh --include=*.kts --include=*.mk --include=*.gradle | head -80
+          echo "===== file list ====="
+          find . -maxdepth 3 -not -path './engine/*' -not -path './.git/*' | head -100
       - name: Patch engine activity and add fonts
         working-directory: project
         run: |
@@ -142,7 +153,7 @@ jobs:
           path: |
             project/engine
             project/.ndk
-          key: engine-cache-v1
+          key: engine-cache-v2-diag
       - name: Build engine
         if: ${{ inputs.with_engine }}
         working-directory: project
@@ -171,4 +182,3 @@ jobs:
         with:
           name: SourceDroid-apk
           path: project/app/build/outputs/apk/release/*.apk
-          
