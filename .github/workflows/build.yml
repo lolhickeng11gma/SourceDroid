@@ -323,7 +323,105 @@ jobs:
       # ------------------------------------------------------------
       # Build Source Engine
       # ------------------------------------------------------------
+      - name: Prepare ARM64 SDL2
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        env:
+          SOURCEDROID_NDK: ${{ github.workspace }}/project/.ndk/android-ndk-r10e
+        run: |
+          set -e
 
+          echo "Preparing ARM64 SDL2 build..."
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("scripts/build_engine.sh")
+          s = p.read_text()
+
+          marker = '"$PY" ./waf configure -T "$BUILD_TYPE" --android=aarch64,4.9,21 --togles --disable-warns'
+
+          if marker not in s:
+              print("ERROR: ARM64 waf configure command was not found")
+              print("Current configure lines:")
+              for line in s.splitlines():
+                  if "waf configure" in line:
+                      print(line)
+              raise SystemExit(1)
+
+          build_sdl = r'''
+          echo "========================================"
+          echo "Building SDL2 for ARM64"
+          echo "========================================"
+
+          NDK_LOCAL="$SOURCEDROID_NDK"
+
+          if [ ! -x "$NDK_LOCAL/ndk-build" ]; then
+              echo "ERROR: NDK r10e was not found:"
+              echo "$NDK_LOCAL"
+              exit 1
+          fi
+
+          export PATH="$NDK_LOCAL:$PATH"
+
+          cd engine
+
+          sh thirdparty/SDL-src/build-scripts/androidbuildlibs.sh \
+            NDK_LIBS_OUT=thirdparty/SDL-src/build/android/lib
+
+          echo
+          echo "SDL2 build output:"
+
+          find thirdparty/SDL-src/build/android/lib \
+            -type f \
+            -name "*.so" \
+            -print
+
+          mkdir -p lib/android/aarch64
+
+          if [ ! -f thirdparty/SDL-src/build/android/lib/arm64-v8a/libSDL2.so ]; then
+              echo "ERROR: ARM64 SDL2 was not produced."
+              exit 1
+          fi
+
+          cp \
+            thirdparty/SDL-src/build/android/lib/arm64-v8a/libSDL2.so \
+            lib/android/aarch64/libSDL2.so
+
+          echo
+          echo "ARM64 SDL2 installed:"
+          file lib/android/aarch64/libSDL2.so
+          '''
+
+          replacement = build_sdl + "\n" + marker
+
+          s = s.replace(marker, replacement, 1)
+
+          p.write_text(s)
+
+          print("build_engine.sh patched successfully.")
+          PY
+
+      - name: Build ARM64 Source Engine
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        env:
+          ANDROID_ABI: arm64-v8a
+          ANDROID_ARCH: aarch64
+          ANDROID_PLATFORM: android-21
+          SOURCEDROID_NDK: ${{ github.workspace }}/project/.ndk/android-ndk-r10e
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "Building Source Engine for ARM64"
+          echo "Architecture: aarch64"
+          echo "Android ABI: arm64-v8a"
+          echo "API: 21"
+          echo "========================================"
+
+          bash scripts/build_engine.sh
+    
       - name: Build ARM64 Source Engine
         if: ${{ inputs.with_engine }}
         working-directory: project
