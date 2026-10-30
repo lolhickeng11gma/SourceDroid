@@ -142,18 +142,80 @@ jobs:
           path: |
             project/engine
             project/.ndk
-          key: engine-cache-v1
-      - name: Patch engine to report the failed allocation size
+          key: engine-cache-v2
+      - name: Patch engine to report the failed allocation and its call stack
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: |
           [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
-          sed -i 's/Error( "Out of memory or address space\.  Texture quality setting may be too high\.\\n" );/Error( "Out of memory: failed allocation of %u bytes\\n", (unsigned)nSize );/' engine/tier0/mem.cpp
-          grep -n "failed allocation" engine/tier0/mem.cpp
+          python3 - <<'PY'
+          p = "engine/tier0/mem.cpp"
+          s = open(p).read()
+          if "OomPrintBt" not in s:
+              helper = '''
+          #ifdef ANDROID
+          #include <unwind.h>
+          #include <dlfcn.h>
+          #include <stdint.h>
+          struct OomBt { int n; uintptr_t f[48]; };
+          static _Unwind_Reason_Code OomBtCb( struct _Unwind_Context *c, void *p )
+          {
+              OomBt *b = (OomBt*)p;
+              if ( b->n >= 48 ) return _URC_END_OF_STACK;
+              b->f[b->n++] = _Unwind_GetIP( c );
+              return _URC_NO_REASON;
+          }
+          static void OomPrintBt( size_t nSize )
+          {
+              OomBt b; b.n = 0;
+              _Unwind_Backtrace( OomBtCb, &b );
+              Msg( "OOM: failed allocation of %u bytes\\n", (unsigned)nSize );
+              for ( int i = 0; i < b.n; i++ )
+              {
+                  Dl_info d;
+                  if ( dladdr( (void*)b.f[i], &d ) && d.dli_fname )
+                      Msg( "OOM bt #%d %s+0x%lx\\n", i, d.dli_fname, (unsigned long)( b.f[i] - (uintptr_t)d.dli_fbase ) );
+                  else
+                      Msg( "OOM bt #%d 0x%lx\\n", i, (unsigned long)b.f[i] );
+              }
+          }
+          #endif
+          '''
+              s = s.replace("static bool s_oomerror_called = false;\n", "static bool s_oomerror_called = false;\n" + helper, 1)
+              s = s.replace("\t\ts_oomerror_called = true;\n", "\t\ts_oomerror_called = true;\n#ifdef ANDROID\n\t\tOomPrintBt( nSize );\n#endif\n", 1)
+              old = 'Error( "Out of memory or address space.  Texture quality setting may be too high.\\n" );'
+              new = 'Error( "Out of memory: failed allocation of %u bytes\\n", (unsigned)nSize );'
+              assert old in s
+              s = s.replace(old, new, 1)
+              open(p, "w").write(s)
+          PY
+          sed -n 28,75p engine/tier0/mem.cpp
+
       - name: Build engine
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: bash scripts/build_engine.sh
+      - name: Symbolize call stack from bt.txt (if the file exists in the repo)
+        if: ${{ inputs.with_engine }}
+        run: |
+          [ -f bt.txt ] || { echo "no bt.txt, skipping"; exit 0; }
+          TOOL=$(find project/.ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-addr2line' | head -1)
+          python3 - "$TOOL" <<'PY'
+          import re, subprocess, sys, glob, os
+          tool = sys.argv[1]
+          for line in open("bt.txt", errors="ignore"):
+              m = re.search(r"(\S+\.so)\+0x([0-9a-fA-F]+)", line)
+              if not m:
+                  continue
+              lib, off = os.path.basename(m.group(1)), int(m.group(2), 16)
+              cands = glob.glob("project/engine/build/**/" + lib, recursive=True)
+              if not cands:
+                  print("NOLIB", lib, hex(off)); continue
+              a = (off & ~1) - 2
+              r = subprocess.run([tool, "-f", "-C", "-e", cands[0], hex(a)], capture_output=True, text=True)
+              print("SYM", lib, hex(off), "=>", " @ ".join(r.stdout.split("\n")[:2]))
+          PY
+
       - name: Disable SDL HIDAPI (its native library is not built)
         working-directory: project
         run: |
