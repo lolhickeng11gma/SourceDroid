@@ -135,13 +135,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Patch engine to report the failed allocation size
-        if: ${{ inputs.with_engine }}
-        working-directory: project
-        run: |
-          [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
-          sed -i 's/Error( "Out of memory or address space\.  Texture quality setting may be too high\.\\n" );/Error( "Out of memory: failed allocation of %u bytes\\n", (unsigned)nSize );/' engine/tier0/mem.cpp
-          grep -n "failed allocation" engine/tier0/mem.cpp
       - name: Cache engine build
         if: ${{ inputs.with_engine }}
         uses: actions/cache@v4
@@ -150,6 +143,13 @@ jobs:
             project/engine
             project/.ndk
           key: engine-cache-v1
+      - name: Patch engine to report the failed allocation size
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
+          sed -i 's/Error( "Out of memory or address space\.  Texture quality setting may be too high\.\\n" );/Error( "Out of memory: failed allocation of %u bytes\\n", (unsigned)nSize );/' engine/tier0/mem.cpp
+          grep -n "failed allocation" engine/tier0/mem.cpp
       - name: Build engine
         if: ${{ inputs.with_engine }}
         working-directory: project
