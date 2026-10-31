@@ -162,6 +162,8 @@ jobs:
               snprintf( path, sizeof( path ), "%s/sourcedroid_crash.log", r ? r : "/sdcard" );
               FILE *f = fopen( path, "a" );
               if ( f ) { fputs( m, f ); fclose( f ); }
+              f = fopen( "/storage/emulated/0/Download/sourcedroid_crash.log", "a" );
+              if ( f ) { fputs( m, f ); fclose( f ); }
           }
           #define Log(msg) __android_log_print(ANDROID_LOG_DEBUG, "SRCENG", "%s", msg); DebugLogger()->Write(msg); SdFileLog(msg);'''
               s = s.replace(old, new, 1)
@@ -203,16 +205,26 @@ jobs:
           }
           static void OomPrintBt( size_t nSize )
           {
-              char path[600];
               const char *root = getenv( "VALVE_GAME_PATH" );
-              snprintf( path, sizeof path, "%s/oom_trace.txt", root ? root : "/sdcard" );
-              g_oomFd = open( path, O_WRONLY | O_CREAT | O_TRUNC, 0666 );
-              char line[128];
-              snprintf( line, sizeof line, "OOM: failed allocation of %u bytes\n", (unsigned)nSize );
-              OomWrite( line );
-              _Unwind_Backtrace( OomBtCb, NULL );
-              OomWrite( "OOM end of trace\n" );
-              if ( g_oomFd >= 0 ) close( g_oomFd );
+              const char *app = getenv( "APP_DATA_PATH" );
+              char paths[4][600];
+              snprintf( paths[0], 600, "%s/oom_trace.txt", root ? root : "/sdcard" );
+              snprintf( paths[1], 600, "/storage/emulated/0/oom_trace.txt" );
+              snprintf( paths[2], 600, "/storage/emulated/0/Download/oom_trace.txt" );
+              snprintf( paths[3], 600, "%s/files/oom_trace.txt", app ? app : "/data/local/tmp" );
+              for ( int k = 0; k < 4; k++ )
+              {
+                  g_oomN = 0;
+                  g_oomFd = open( paths[k], O_WRONLY | O_CREAT | O_TRUNC, 0666 );
+                  if ( g_oomFd < 0 ) continue;
+                  char line[700];
+                  snprintf( line, sizeof line, "OOM: failed allocation of %u bytes (file %s)\n", (unsigned)nSize, paths[k] );
+                  OomWrite( line );
+                  _Unwind_Backtrace( OomBtCb, NULL );
+                  OomWrite( "OOM end of trace\n" );
+                  close( g_oomFd );
+                  g_oomFd = -1;
+              }
           }
           #endif
           """
