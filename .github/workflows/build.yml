@@ -280,6 +280,40 @@ jobs:
           grep -n "SdFileLog" engine/launcher/android/crashhandler.cpp | head -3
           grep -n "OomPrintBt" engine/tier0/mem.cpp
 
+      - name: Patch materialsystem (stop endless thread-event loop in EndFrame)
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
+          git -C engine checkout -- materialsystem/cmaterialsystem.cpp
+          python3 - <<'PY'
+          p = "engine/materialsystem/cmaterialsystem.cpp"
+          s = open(p).read()
+          T = "\t"
+          old = (T*2 + "for ( int i = 0; i < m_threadEvents.Count(); i++ )\n" +
+                 T*2 + "{\n" +
+                 T*3 + "g_pShaderDevice->HandleThreadEvent(m_threadEvents[i]);\n" +
+                 T*2 + "}\n" +
+                 T*2 + "m_threadEvents.RemoveAll();\n")
+          new = (T*2 + "if ( m_threadEvents.Count() )\n" +
+                 T*2 + "{\n" +
+                 T*3 + "// Single-threaded: this thread must own the device, otherwise the handlers re-post the event forever.\n" +
+                 T*3 + "g_pShaderAPI->AcquireThreadOwnership();\n" +
+                 T*3 + "// Handle only events queued so far; ones re-posted meanwhile wait for the next frame.\n" +
+                 T*3 + "int nEvents = m_threadEvents.Count();\n" +
+                 T*3 + "for ( int i = 0; i < nEvents; i++ )\n" +
+                 T*3 + "{\n" +
+                 T*4 + "g_pShaderDevice->HandleThreadEvent( m_threadEvents[i] );\n" +
+                 T*3 + "}\n" +
+                 T*3 + "m_threadEvents.RemoveMultiple( 0, nEvents );\n" +
+                 T*3 + "if ( m_threadEvents.Count() > 64 )\n" +
+                 T*4 + "m_threadEvents.RemoveAll();\n" +
+                 T*2 + "}\n")
+          assert s.count(old) == 1
+          open(p, "w").write(s.replace(old, new, 1))
+          PY
+          grep -n "Handle only events" engine/materialsystem/cmaterialsystem.cpp
+
       - name: Build engine
         if: ${{ inputs.with_engine }}
         working-directory: project
