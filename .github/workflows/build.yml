@@ -143,53 +143,88 @@ jobs:
             project/engine
             project/.ndk
           key: engine-cache-v2
-      - name: Patch engine to report the failed allocation and its call stack
+      - name: Patch engine to log the call stack of the memory error
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: |
           [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
           python3 - <<'PY'
+          # 1) crash handler: also write the report to <game folder>/sourcedroid_crash.log
+          p = "engine/launcher/android/crashhandler.cpp"
+          s = open(p).read()
+          if "SdFileLog" not in s:
+              old = '#define Log(msg) __android_log_print(ANDROID_LOG_DEBUG, "SRCENG", "%s", msg); DebugLogger()->Write(msg);'
+              assert old in s
+              new = '''static void SdFileLog( const char *m )
+          {
+              const char *r = getenv( "VALVE_GAME_PATH" );
+              char path[1024];
+              snprintf( path, sizeof( path ), "%s/sourcedroid_crash.log", r ? r : "/sdcard" );
+              FILE *f = fopen( path, "a" );
+              if ( f ) { fputs( m, f ); fclose( f ); }
+          }
+          #define Log(msg) __android_log_print(ANDROID_LOG_DEBUG, "SRCENG", "%s", msg); DebugLogger()->Write(msg); SdFileLog(msg);'''
+              s = s.replace(old, new, 1)
+              open(p, "w").write(s)
+          # 2) memory error: write size + call stack straight to <game folder>/oom_trace.txt (open/write/fsync per frame)
+          import subprocess
+          subprocess.call(["git", "-C", "engine", "checkout", "--", "tier0/mem.cpp"])
           p = "engine/tier0/mem.cpp"
           s = open(p).read()
-          if "OomPrintBt" not in s:
-              helper = '''
+          helper = r"""
           #ifdef ANDROID
           #include <unwind.h>
           #include <dlfcn.h>
           #include <stdint.h>
-          struct OomBt { int n; uintptr_t f[48]; };
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <fcntl.h>
+          #include <unistd.h>
+          static int g_oomFd = -1;
+          static int g_oomN = 0;
+          static void OomWrite( const char *s )
+          {
+              if ( g_oomFd >= 0 ) { write( g_oomFd, s, strlen( s ) ); fsync( g_oomFd ); }
+          }
           static _Unwind_Reason_Code OomBtCb( struct _Unwind_Context *c, void *p )
           {
-              OomBt *b = (OomBt*)p;
-              if ( b->n >= 48 ) return _URC_END_OF_STACK;
-              b->f[b->n++] = _Unwind_GetIP( c );
+              if ( g_oomN >= 40 ) return _URC_END_OF_STACK;
+              uintptr_t ip = _Unwind_GetIP( c );
+              char line[600];
+              Dl_info d;
+              if ( dladdr( (void*)ip, &d ) && d.dli_fname )
+                  snprintf( line, sizeof line, "OOM bt #%d %s+0x%lx\n", g_oomN, d.dli_fname, (unsigned long)( ip - (uintptr_t)d.dli_fbase ) );
+              else
+                  snprintf( line, sizeof line, "OOM bt #%d 0x%lx\n", g_oomN, (unsigned long)ip );
+              g_oomN++;
+              OomWrite( line );
               return _URC_NO_REASON;
           }
           static void OomPrintBt( size_t nSize )
           {
-              OomBt b; b.n = 0;
-              _Unwind_Backtrace( OomBtCb, &b );
-              Msg( "OOM: failed allocation of %u bytes\\n", (unsigned)nSize );
-              for ( int i = 0; i < b.n; i++ )
-              {
-                  Dl_info d;
-                  if ( dladdr( (void*)b.f[i], &d ) && d.dli_fname )
-                      Msg( "OOM bt #%d %s+0x%lx\\n", i, d.dli_fname, (unsigned long)( b.f[i] - (uintptr_t)d.dli_fbase ) );
-                  else
-                      Msg( "OOM bt #%d 0x%lx\\n", i, (unsigned long)b.f[i] );
-              }
+              char path[600];
+              const char *root = getenv( "VALVE_GAME_PATH" );
+              snprintf( path, sizeof path, "%s/oom_trace.txt", root ? root : "/sdcard" );
+              g_oomFd = open( path, O_WRONLY | O_CREAT | O_TRUNC, 0666 );
+              char line[128];
+              snprintf( line, sizeof line, "OOM: failed allocation of %u bytes\n", (unsigned)nSize );
+              OomWrite( line );
+              _Unwind_Backtrace( OomBtCb, NULL );
+              OomWrite( "OOM end of trace\n" );
+              if ( g_oomFd >= 0 ) close( g_oomFd );
           }
           #endif
-          '''
-              s = s.replace("static bool s_oomerror_called = false;\n", "static bool s_oomerror_called = false;\n" + helper, 1)
-              s = s.replace("\t\ts_oomerror_called = true;\n", "\t\ts_oomerror_called = true;\n#ifdef ANDROID\n\t\tOomPrintBt( nSize );\n#endif\n", 1)
-              old = 'Error( "Out of memory or address space.  Texture quality setting may be too high.\\n" );'
-              new = 'Error( "Out of memory: failed allocation of %u bytes\\n", (unsigned)nSize );'
-              assert old in s
-              s = s.replace(old, new, 1)
-              open(p, "w").write(s)
+          """
+          import textwrap
+          helper = textwrap.dedent(helper)
+          s = s.replace("static bool s_oomerror_called = false;\n", "static bool s_oomerror_called = false;\n" + helper, 1)
+          s = s.replace("\t\ts_oomerror_called = true;\n", "\t\ts_oomerror_called = true;\n#ifdef ANDROID\n\t\tOomPrintBt( nSize );\n#endif\n", 1)
+          assert "OomPrintBt( nSize )" in s
+          open(p, "w").write(s)
           PY
-          sed -n 28,75p engine/tier0/mem.cpp
+          grep -n "SdFileLog" engine/launcher/android/crashhandler.cpp | head -3
+          grep -n "OomPrintBt" engine/tier0/mem.cpp
 
       - name: Build engine
         if: ${{ inputs.with_engine }}
@@ -204,10 +239,10 @@ jobs:
           import re, subprocess, sys, glob, os
           tool = sys.argv[1]
           for line in open("bt.txt", errors="ignore"):
-              m = re.search(r"(\S+\.so)\+0x([0-9a-fA-F]+)", line)
+              m = re.match(r"\s*0x([0-9A-Fa-f]+):.*?(\S+\.so)\)", line)
               if not m:
                   continue
-              lib, off = os.path.basename(m.group(1)), int(m.group(2), 16)
+              off, lib = int(m.group(1), 16), os.path.basename(m.group(2))
               cands = glob.glob("project/engine/build/**/" + lib, recursive=True)
               if not cands:
                   print("NOLIB", lib, hex(off)); continue
