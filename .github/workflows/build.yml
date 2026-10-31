@@ -175,7 +175,6 @@ jobs:
           s = open(p).read()
           helper = r"""
           #ifdef ANDROID
-          #include <unwind.h>
           #include <dlfcn.h>
           #include <stdint.h>
           #include <stdio.h>
@@ -183,27 +182,15 @@ jobs:
           #include <string.h>
           #include <fcntl.h>
           #include <unistd.h>
+          #include <pthread.h>
           static int g_oomFd = -1;
-          static int g_oomN = 0;
+          static char g_oomMaps[400000];
           static void OomWrite( const char *s )
           {
               if ( g_oomFd >= 0 ) { write( g_oomFd, s, strlen( s ) ); fsync( g_oomFd ); }
           }
-          static _Unwind_Reason_Code OomBtCb( struct _Unwind_Context *c, void *p )
-          {
-              if ( g_oomN >= 40 ) return _URC_END_OF_STACK;
-              uintptr_t ip = _Unwind_GetIP( c );
-              char line[600];
-              Dl_info d;
-              if ( dladdr( (void*)ip, &d ) && d.dli_fname )
-                  snprintf( line, sizeof line, "OOM bt #%d %s+0x%lx\n", g_oomN, d.dli_fname, (unsigned long)( ip - (uintptr_t)d.dli_fbase ) );
-              else
-                  snprintf( line, sizeof line, "OOM bt #%d 0x%lx\n", g_oomN, (unsigned long)ip );
-              g_oomN++;
-              OomWrite( line );
-              return _URC_NO_REASON;
-          }
-          static void OomPrintBt( size_t nSize )
+          // No unwinder (it crashes here): scan the stack for return addresses into executable library mappings.
+          static void __attribute__((noinline)) OomPrintBt( size_t nSize )
           {
               const char *root = getenv( "VALVE_GAME_PATH" );
               const char *app = getenv( "APP_DATA_PATH" );
@@ -212,15 +199,70 @@ jobs:
               snprintf( paths[1], 600, "/storage/emulated/0/oom_trace.txt" );
               snprintf( paths[2], 600, "/storage/emulated/0/Download/oom_trace.txt" );
               snprintf( paths[3], 600, "%s/files/oom_trace.txt", app ? app : "/data/local/tmp" );
+              int mfd = open( "/proc/self/maps", O_RDONLY );
+              int mlen = 0;
+              if ( mfd >= 0 )
+              {
+                  int r;
+                  while ( mlen < (int)sizeof( g_oomMaps ) - 1 && ( r = read( mfd, g_oomMaps + mlen, sizeof( g_oomMaps ) - 1 - mlen ) ) > 0 ) mlen += r;
+                  close( mfd );
+              }
+              g_oomMaps[mlen] = 0;
+              volatile uintptr_t marker = 0;
+              uintptr_t *sp = (uintptr_t*)&marker;
+              int maxWords = 12000;
+              {
+                  pthread_attr_t at; void *sa = 0; size_t ss = 0;
+                  if ( pthread_getattr_np( pthread_self(), &at ) == 0 )
+                  {
+                      pthread_attr_getstack( &at, &sa, &ss );
+                      pthread_attr_destroy( &at );
+                      long left = (long)( ( (uintptr_t)sa + ss - (uintptr_t)sp ) / sizeof( uintptr_t ) );
+                      if ( left < maxWords ) maxWords = left > 0 ? (int)left : 0;
+                  }
+                  else maxWords = 2000;
+              }
               for ( int k = 0; k < 4; k++ )
               {
-                  g_oomN = 0;
                   g_oomFd = open( paths[k], O_WRONLY | O_CREAT | O_TRUNC, 0666 );
                   if ( g_oomFd < 0 ) continue;
-                  char line[700];
+                  char line[900];
                   snprintf( line, sizeof line, "OOM: failed allocation of %u bytes (file %s)\n", (unsigned)nSize, paths[k] );
                   OomWrite( line );
-                  _Unwind_Backtrace( OomBtCb, NULL );
+                  int hits = 0;
+                  for ( int i = 0; i < maxWords && hits < 120; i++ )
+                  {
+                      uintptr_t v = sp[i];
+                      if ( v < 0x10000 ) continue;
+                      // find the mapping line containing v with 'x' permission
+                      const char *p = g_oomMaps;
+                      while ( p && *p )
+                      {
+                          unsigned long lo = 0, hi = 0;
+                          char perm[8] = {0};
+                          if ( sscanf( p, "%lx-%lx %7s", &lo, &hi, perm ) == 3 && v >= lo && v < hi )
+                          {
+                              if ( perm[2] == 'x' )
+                              {
+                                  const char *path = strchr( p, '/' );
+                                  const char *eol = strchr( p, '\n' );
+                                  if ( path && eol && path < eol && strstr( path, ".so" ) )
+                                  {
+                                      char lib[600]; int n = (int)( eol - path ); if ( n > 599 ) n = 599;
+                                      memcpy( lib, path, n ); lib[n] = 0;
+                                      Dl_info d;
+                                      unsigned long base = dladdr( (void*)v, &d ) ? (unsigned long)d.dli_fbase : lo;
+                                      snprintf( line, sizeof line, "0x%lX:\tstack[%d] (base=0x%lX, %s)\n", (unsigned long)v - base, i, base, lib );
+                                      OomWrite( line );
+                                      hits++;
+                                  }
+                              }
+                              break;
+                          }
+                          p = strchr( p, '\n' );
+                          if ( p ) p++;
+                      }
+                  }
                   OomWrite( "OOM end of trace\n" );
                   close( g_oomFd );
                   g_oomFd = -1;
@@ -245,12 +287,16 @@ jobs:
       - name: Symbolize call stack from bt.txt (if the file exists in the repo)
         if: ${{ inputs.with_engine }}
         run: |
-          [ -f bt.txt ] || { echo "no bt.txt, skipping"; exit 0; }
+          [ -f bt.txt ] || [ -f oom_trace.txt ] || { echo "no bt.txt / oom_trace.txt, skipping"; exit 0; }
           TOOL=$(find project/.ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-addr2line' | head -1)
           python3 - "$TOOL" <<'PY'
           import re, subprocess, sys, glob, os
           tool = sys.argv[1]
-          for line in open("bt.txt", errors="ignore"):
+          lines = []
+          for fn in ("bt.txt", "oom_trace.txt"):
+              if os.path.exists(fn):
+                  lines += open(fn, errors="ignore").read().splitlines()
+          for line in lines:
               m = re.match(r"\s*0x([0-9A-Fa-f]+):.*?(\S+\.so)\)", line)
               if not m:
                   continue
