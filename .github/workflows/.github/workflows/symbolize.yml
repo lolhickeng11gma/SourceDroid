@@ -1,0 +1,80 @@
+name: Symbolize OOM trace
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sym:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore engine build cache (no rebuild)
+        id: c
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            project/engine
+            project/.ndk
+          key: engine-cache-v2
+      - name: Symbolize
+        run: |
+          echo "cache hit: ${{ steps.c.outputs.cache-hit }}"
+          TOOL=$(find project/.ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-addr2line' | head -1)
+          echo "tool: $TOOL"
+          cat > frames.txt <<'EOF'
+          libfilesystem_stdio.so 356C4
+          libfilesystem_stdio.so 8AB23
+          libfilesystem_stdio.so 78E48
+          libfilesystem_stdio.so 8AB28
+          libfilesystem_stdio.so 358B4
+          libfilesystem_stdio.so B780
+          libfilesystem_stdio.so BB6C
+          libfilesystem_stdio.so 16360
+          libengine.so 933C20
+          libengine.so 91EBEC
+          libfilesystem_stdio.so 8BCCC
+          libtier0.so FC48
+          libtier0.so FF34
+          libmaterialsystem.so 66C20
+          libmaterialsystem.so 6D1B0
+          libmaterialsystem.so 66500
+          libengine.so 3EB220
+          libengine.so 3EB4E0
+          libengine.so 93C570
+          libinputsystem.so 7384
+          libengine.so 3207C8
+          libengine.so 3209D4
+          libengine.so 320AF8
+          libengine.so 5C3D60
+          libengine.so 322F18
+          libengine.so 1E8B20
+          liblauncher.so 3A808
+          liblauncher.so C208
+          liblauncher.so 4BCB4
+          liblauncher.so 4BCB8
+          liblauncher.so 4BCBC
+          liblauncher.so 4BCC4
+          liblauncher.so 4BCCC
+          liblauncher.so 3AB20
+          liblauncher.so 4C1AC
+          liblauncher.so 4C194
+          liblauncher.so 11D64
+          EOF
+          python3 - "$TOOL" <<'PY'
+          import subprocess, sys, glob
+          tool = sys.argv[1]
+          for line in open("frames.txt"):
+              p = line.split()
+              if len(p) != 2:
+                  continue
+              lib, off = p[0], int(p[1], 16)
+              c = glob.glob("project/engine/build/**/" + lib, recursive=True)
+              if not c:
+                  print("NOLIB", lib, hex(off)); continue
+              # return address: Thumb bit off, minus the call instruction size
+              a = (off & ~1) - 2
+              r = subprocess.run([tool, "-f", "-C", "-i", "-e", c[0], hex(a)], capture_output=True, text=True)
+              out = r.stdout.strip().split("\n")
+              print("SYM", lib, hex(off), "=>", " | ".join(out))
+          PY
+          
