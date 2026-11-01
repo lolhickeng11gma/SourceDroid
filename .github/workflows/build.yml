@@ -71,7 +71,79 @@ jobs:
                   setenv("APP_DATA_PATH", files.getParent(), 1);
                   setenv("APP_LIB_PATH", getApplicationInfo().nativeLibraryDir, 1);
                   setenv("TMPDIR", getCacheDir().getAbsolutePath(), 1);
+
+                  // Touch-control materials (icons) shipped in assets/extras: the engine mounts this dir.
+                  try {
+                      File extras = copyAssetTree("extras", new File(files, "extras"));
+                      if (extras != null) setenv("EXTRAS_VPK_PATH", extras.getAbsolutePath() + "/", 1);
+                  } catch (Exception ignored) {
+                  }
+
+                  // Per-game client/server libraries (cs:s, episodic, ...) from assets/gamelibs/<variant>.
+                  String variant = pickVariant(args);
+                  if (variant != null) {
+                      try {
+                          File mod = copyAssetTree("gamelibs/" + variant, new File(files, "gamelibs/" + variant));
+                          if (mod != null) setenv("APP_MOD_LIB", mod.getAbsolutePath(), 1);
+                      } catch (Exception ignored) {
+                      }
+                  }
                   setArgs(sb.toString().trim());
+              }
+
+              /** Maps "-game <dir>" to the name of the client/server variant, or null for the default (HL2) one. */
+              private static String pickVariant(String[] args) {
+                  if (args == null) return null;
+                  for (int i = 0; i + 1 < args.length; i++) {
+                      if (!"-game".equalsIgnoreCase(args[i])) continue;
+                      String g = args[i + 1].replace('\\', '/');
+                      int k = g.lastIndexOf('/');
+                      if (k >= 0) g = g.substring(k + 1);
+                      g = g.toLowerCase();
+                      if (g.equals("cstrike")) return "cstrike";
+                      if (g.equals("episodic") || g.equals("ep2")) return "episodic";
+                      return null;
+                  }
+                  return null;
+              }
+
+              /** Copies an assets subtree to dest (once per app version). Returns dest, or null if the asset dir is empty/missing. */
+              private File copyAssetTree(String assetPath, File dest) throws Exception {
+                  AssetManager am = getAssets();
+                  String[] top = am.list(assetPath);
+                  if (top == null || top.length == 0) return null;
+                  long stamp = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+                  File marker = new File(dest, ".stamp");
+                  if (marker.exists()) {
+                      try (BufferedReader r = new BufferedReader(new InputStreamReader(new java.io.FileInputStream(marker)))) {
+                          if (String.valueOf(stamp).equals(r.readLine())) return dest;
+                      } catch (Exception ignored) {
+                      }
+                  }
+                  copyAssetDir(am, assetPath, dest);
+                  try (OutputStream o = new FileOutputStream(marker)) {
+                      o.write(String.valueOf(stamp).getBytes());
+                  }
+                  return dest;
+              }
+
+              private void copyAssetDir(AssetManager am, String path, File dest) throws Exception {
+                  String[] kids = am.list(path);
+                  if (kids != null && kids.length > 0) {
+                      dest.mkdirs();
+                      for (String k : kids) copyAssetDir(am, path + "/" + k, new File(dest, k));
+                      return;
+                  }
+                  File parent = dest.getParentFile();
+                  if (parent != null) parent.mkdirs();
+                  if (dest.exists()) dest.setWritable(true);
+                  try (InputStream in = am.open(path); OutputStream o = new FileOutputStream(dest)) {
+                      byte[] buf = new byte[65536];
+                      int r;
+                      while ((r = in.read(buf)) > 0) o.write(buf, 0, r);
+                  }
+                  dest.setReadable(true, false);
+                  if (dest.getName().endsWith(".so")) dest.setReadOnly(); // Android 14: loaded code must not be writable
               }
 
               /** Copies assets/fonts/* into <app files dir>, where the engine looks for them. */
@@ -102,6 +174,8 @@ jobs:
                       String line;
                       while ((line = r.readLine()) != null) {
                           line = line.trim();
+                          // client/server are loaded by the engine itself (per-game variants may replace them)
+                          if (line.equals("client") || line.equals("server")) continue;
                           if (!line.isEmpty()) libs.add(line);
                       }
                       r.close();
@@ -128,6 +202,83 @@ jobs:
           cp /usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf app/src/main/assets/fonts/
           cp /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf app/src/main/assets/fonts/DroidSansFallback.ttf || true
           ls -la app/src/main/assets/fonts
+          pip install --quiet --break-system-packages pillow || pip install --quiet pillow
+          cat > /tmp/touch_icons.py <<'ICONS_EOF'
+          import os, struct, sys
+          from PIL import Image, ImageDraw, ImageFont
+
+          OUT = sys.argv[1]  # .../materials/vgui/touch
+          os.makedirs(OUT, exist_ok=True)
+          S = 128
+          FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+          LABELS = {
+              "use": "USE", "jump": "JUMP", "shoot": "FIRE", "shoot_alt": "ALT", "crouch": "DUCK",
+              "tduck": "DUCK", "zoom": "ZOOM", "speed": "WALK", "load": "LOAD", "save": "SAVE",
+              "reload": "RELOAD", "flash_light_filled": "LIGHT", "next_weap": "NEXT", "prev_weap": "PREV",
+              "settings": "SET",
+          }
+
+          def fit_font(draw, text, maxw):
+              size = 40
+              while size > 10:
+                  f = ImageFont.truetype(FONT, size)
+                  w = draw.textlength(text, font=f)
+                  if w <= maxw:
+                      return f
+                  size -= 2
+              return ImageFont.truetype(FONT, 10)
+
+          def base():
+              im = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+              d = ImageDraw.Draw(im)
+              d.ellipse((6, 6, S - 7, S - 7), fill=(255, 255, 255, 40), outline=(255, 255, 255, 255), width=6)
+              return im, d
+
+          def make(name):
+              im, d = base()
+              if name == "menu":
+                  for y in (42, 60, 78):
+                      d.rounded_rectangle((34, y, 94, y + 9), radius=4, fill=(255, 255, 255, 255))
+              elif name == "back":
+                  d.polygon([(80, 30), (44, 64), (80, 98), (80, 82), (62, 64), (80, 46)], fill=(255, 255, 255, 255))
+              else:
+                  t = LABELS[name]
+                  f = fit_font(d, t, 88)
+                  w = d.textlength(t, font=f)
+                  bbox = d.textbbox((0, 0), t, font=f)
+                  h = bbox[3] - bbox[1]
+                  d.text(((S - w) / 2, (S - h) / 2 - bbox[1]), t, font=f, fill=(255, 255, 255, 255))
+              return im
+
+          def write_vtf(path, im):
+              data = im.convert("RGBA").tobytes()  # RGBA8888 = format 0
+              flags = 0x4 | 0x8 | 0x100 | 0x200    # clamp s/t, no mip, no lod
+              hdr = struct.pack("<4sIIIHHIHH4s3f4sfIBIBBH",
+                                b"VTF\0", 7, 2, 80, S, S, flags, 1, 0, b"\0" * 4,
+                                0.5, 0.5, 0.5, b"\0" * 4, 1.0, 0, 1, 0xFFFFFFFF, 0, 0, 1)
+              hdr += b"\0" * (80 - len(hdr))
+              with open(path, "wb") as f:
+                  f.write(hdr + data)
+
+          VMT = '''"UnlitGeneric"
+          {
+          \t"$basetexture" "vgui/touch/%s"
+          \t"$translucent" 1
+          \t"$vertexcolor" 1
+          \t"$vertexalpha" 1
+          \t"$ignorez" 1
+          \t"$nolod" 1
+          \t"$nomip" 1
+          }
+          '''
+
+          for n in list(LABELS) + ["menu", "back"]:
+              write_vtf(os.path.join(OUT, n + ".vtf"), make(n))
+              open(os.path.join(OUT, n + ".vmt"), "w").write(VMT % n)
+          print("icons:", len(os.listdir(OUT)))
+          ICONS_EOF
+          python3 /tmp/touch_icons.py app/src/main/assets/extras/materials/vgui/touch
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -264,107 +415,4 @@ jobs:
                       }
                   }
                   OomWrite( "OOM end of trace\n" );
-                  close( g_oomFd );
-                  g_oomFd = -1;
-              }
-          }
-          #endif
-          """
-          import textwrap
-          helper = textwrap.dedent(helper)
-          s = s.replace("static bool s_oomerror_called = false;\n", "static bool s_oomerror_called = false;\n" + helper, 1)
-          s = s.replace("\t\ts_oomerror_called = true;\n", "\t\ts_oomerror_called = true;\n#ifdef ANDROID\n\t\tOomPrintBt( nSize );\n#endif\n", 1)
-          assert "OomPrintBt( nSize )" in s
-          open(p, "w").write(s)
-          PY
-          grep -n "SdFileLog" engine/launcher/android/crashhandler.cpp | head -3
-          grep -n "OomPrintBt" engine/tier0/mem.cpp
-
-      - name: Patch materialsystem (stop endless thread-event loop in EndFrame)
-        if: ${{ inputs.with_engine }}
-        working-directory: project
-        run: |
-          [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
-          git -C engine checkout -- materialsystem/cmaterialsystem.cpp
-          python3 - <<'PY'
-          p = "engine/materialsystem/cmaterialsystem.cpp"
-          s = open(p).read()
-          T = "\t"
-          old = (T*2 + "for ( int i = 0; i < m_threadEvents.Count(); i++ )\n" +
-                 T*2 + "{\n" +
-                 T*3 + "g_pShaderDevice->HandleThreadEvent(m_threadEvents[i]);\n" +
-                 T*2 + "}\n" +
-                 T*2 + "m_threadEvents.RemoveAll();\n")
-          new = (T*2 + "if ( m_threadEvents.Count() )\n" +
-                 T*2 + "{\n" +
-                 T*3 + "// Single-threaded: this thread must own the device, otherwise the handlers re-post the event forever.\n" +
-                 T*3 + "g_pShaderAPI->AcquireThreadOwnership();\n" +
-                 T*3 + "// Handle only events queued so far; ones re-posted meanwhile wait for the next frame.\n" +
-                 T*3 + "int nEvents = m_threadEvents.Count();\n" +
-                 T*3 + "for ( int i = 0; i < nEvents; i++ )\n" +
-                 T*3 + "{\n" +
-                 T*4 + "g_pShaderDevice->HandleThreadEvent( m_threadEvents[i] );\n" +
-                 T*3 + "}\n" +
-                 T*3 + "m_threadEvents.RemoveMultiple( 0, nEvents );\n" +
-                 T*3 + "if ( m_threadEvents.Count() > 64 )\n" +
-                 T*4 + "m_threadEvents.RemoveAll();\n" +
-                 T*2 + "}\n")
-          assert s.count(old) == 1
-          open(p, "w").write(s.replace(old, new, 1))
-          PY
-          grep -n "Handle only events" engine/materialsystem/cmaterialsystem.cpp
-
-      - name: Build engine
-        if: ${{ inputs.with_engine }}
-        working-directory: project
-        run: bash scripts/build_engine.sh
-      - name: Symbolize call stack from bt.txt (if the file exists in the repo)
-        if: ${{ inputs.with_engine }}
-        run: |
-          [ -f bt.txt ] || [ -f oom_trace.txt ] || { echo "no bt.txt / oom_trace.txt, skipping"; exit 0; }
-          TOOL=$(find project/.ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-addr2line' | head -1)
-          python3 - "$TOOL" <<'PY'
-          import re, subprocess, sys, glob, os
-          tool = sys.argv[1]
-          lines = []
-          for fn in ("bt.txt", "oom_trace.txt"):
-              if os.path.exists(fn):
-                  lines += open(fn, errors="ignore").read().splitlines()
-          for line in lines:
-              m = re.match(r"\s*0x([0-9A-Fa-f]+):.*?(\S+\.so)\)", line)
-              if not m:
-                  continue
-              off, lib = int(m.group(1), 16), os.path.basename(m.group(2))
-              cands = glob.glob("project/engine/build/**/" + lib, recursive=True)
-              if not cands:
-                  print("NOLIB", lib, hex(off)); continue
-              a = (off & ~1) - 2
-              r = subprocess.run([tool, "-f", "-C", "-e", cands[0], hex(a)], capture_output=True, text=True)
-              print("SYM", lib, hex(off), "=>", " @ ".join(r.stdout.split("\n")[:2]))
-          PY
-
-      - name: Disable SDL HIDAPI (its native library is not built)
-        working-directory: project
-        run: |
-          F=engine/thirdparty/SDL-src/android-project/app/src/main/java/org/libsdl/app/HIDDeviceManager.java
-          sed -i 's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' "$F"
-          grep -n "if (true) return null" "$F"
-      - name: Strip debug symbols from engine libraries
-        if: ${{ inputs.with_engine }}
-        working-directory: project
-        run: |
-          STRIP=$(find .ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-strip' | head -1)
-          echo "strip tool: $STRIP"
-          du -sh app/src/main/jniLibs
-          find app/src/main/jniLibs -name '*.so' -exec "$STRIP" --strip-unneeded {} \;
-          du -sh app/src/main/jniLibs
-      - name: Build APK
-        working-directory: project
-        run: |
-          sed -i '/^android {/a\    lint { checkReleaseBuilds = false; abortOnError = false }' app/build.gradle.kts
-          gradle assembleRelease --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SourceDroid-apk
-          path: project/app/build/outputs/apk/release/*.apk
-          
+                  
