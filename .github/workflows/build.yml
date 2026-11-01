@@ -204,56 +204,150 @@ jobs:
           ls -la app/src/main/assets/fonts
           pip install --quiet --break-system-packages pillow || pip install --quiet pillow
           cat > /tmp/touch_icons.py <<'ICONS_EOF'
-          import os, struct, sys
+          import math, os, struct, sys
           from PIL import Image, ImageDraw, ImageFont
 
           OUT = sys.argv[1]  # .../materials/vgui/touch
           os.makedirs(OUT, exist_ok=True)
           S = 128
+          K = 4                      # supersampling
           FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          W = (255, 255, 255, 240)   # icon strokes
+          F = (255, 255, 255, 255)
 
-          LABELS = {
-              "use": "USE", "jump": "JUMP", "shoot": "FIRE", "shoot_alt": "ALT", "crouch": "DUCK",
-              "tduck": "DUCK", "zoom": "ZOOM", "speed": "WALK", "load": "LOAD", "save": "SAVE",
-              "reload": "RELOAD", "flash_light_filled": "LIGHT", "next_weap": "NEXT", "prev_weap": "PREV",
-              "settings": "SET",
-              "cs_buy": "BUY", "cs_autobuy": "AUTO", "cs_radio1": "RADIO1", "cs_radio2": "RADIO2",
-              "cs_radio3": "RADIO3", "cs_score": "SCORE", "cs_drop": "DROP",
-          }
-          for _i in range(1, 10):
-              LABELS["n%d" % _i] = str(_i)
+          class P:
+              def __init__(self):
+                  self.im = Image.new("RGBA", (S * K, S * K), (255, 255, 255, 0))
+                  self.d = ImageDraw.Draw(self.im)
+                  self.d.ellipse((5 * K, 5 * K, (S - 6) * K, (S - 6) * K), fill=(255, 255, 255, 30), outline=W, width=5 * K)
+              def _p(self, pts): return [(x * K, y * K) for x, y in pts]
+              def line(self, pts, w=7): 
+                  self.d.line(self._p(pts), fill=F, width=int(w * K), joint="curve")
+                  for x, y in pts[:1] + pts[-1:]:
+                      r = w * K / 2
+                      self.d.ellipse((x * K - r, y * K - r, x * K + r, y * K + r), fill=F)
+              def poly(self, pts): self.d.polygon(self._p(pts), fill=F)
+              def rrect(self, b, r=4, fill=True, w=5):
+                  bb = [v * K for v in b]
+                  if fill: self.d.rounded_rectangle(bb, radius=r * K, fill=F)
+                  else: self.d.rounded_rectangle(bb, radius=r * K, outline=F, width=int(w * K))
+              def ell(self, b, fill=True, w=5):
+                  bb = [v * K for v in b]
+                  if fill: self.d.ellipse(bb, fill=F)
+                  else: self.d.ellipse(bb, outline=F, width=int(w * K))
+              def arc(self, b, a0, a1, w=7):
+                  self.d.arc([v * K for v in b], a0, a1, fill=F, width=int(w * K))
+              def erase_rrect(self, b, r=3):
+                  self.d.rounded_rectangle([v * K for v in b], radius=r * K, fill=(255, 255, 255, 0))
+              def text(self, t, cx, cy, size):
+                  f = ImageFont.truetype(FONT, int(size * K))
+                  bb = self.d.textbbox((0, 0), t, font=f)
+                  self.d.text((cx * K - (bb[0] + bb[2]) / 2, cy * K - (bb[1] + bb[3]) / 2), t, font=f, fill=F)
+              def done(self): return self.im.resize((S, S), Image.LANCZOS)
 
-          def fit_font(draw, text, maxw):
-              size = 56 if len(text) == 1 else 40
-              while size > 10:
-                  f = ImageFont.truetype(FONT, size)
-                  w = draw.textlength(text, font=f)
-                  if w <= maxw:
-                      return f
-                  size -= 2
-              return ImageFont.truetype(FONT, 10)
+          def chev(p, cx, cy, up=True, w=7, s=20):
+              dy = -s * 0.55 if up else s * 0.55
+              p.line([(cx - s, cy - dy), (cx, cy + dy), (cx + s, cy - dy)], w)
 
-          def base():
-              im = Image.new("RGBA", (S, S), (255, 255, 255, 0))
-              d = ImageDraw.Draw(im)
-              d.ellipse((6, 6, S - 7, S - 7), fill=(255, 255, 255, 40), outline=(255, 255, 255, 255), width=6)
-              return im, d
+          def walkie(p, digit):
+              p.rrect((44, 46, 86, 108), 8)
+              p.rrect((72, 22, 80, 48), 3)
+              p.erase_rrect((51, 53, 79, 70), 3)
+              p.text(digit, 65, 61.5, 17)
+              for y in (80, 88, 96):
+                  p.erase_rrect((52, y, 78, y + 3.5), 1.5)
 
-          def make(name):
-              im, d = base()
-              if name == "menu":
-                  for y in (42, 60, 78):
-                      d.rounded_rectangle((34, y, 94, y + 9), radius=4, fill=(255, 255, 255, 255))
+          def icon(name):
+              p = P()
+              if name == "jump":
+                  chev(p, 64, 52); chev(p, 64, 80)
+              elif name == "crouch":
+                  chev(p, 64, 46, up=False); chev(p, 64, 74, up=False)
+                  p.line([(40, 98), (88, 98)], 6)
+              elif name == "tduck":
+                  chev(p, 64, 50, up=False, s=22)
+                  p.ell((52, 76, 76, 100), fill=False, w=6)
+                  p.ell((60, 84, 68, 92))
+              elif name == "use":
+                  for x, top in ((46, 44), (56, 38), (66, 40), (76, 48)):
+                      p.rrect((x, top, x + 9, 82), 4.5)
+                  p.rrect((44, 60, 85, 102), 12)
+                  p.rrect((32, 66, 48, 80), 7)
+              elif name == "shoot":
+                  p.poly([(64, 24), (80, 46), (48, 46)])
+                  p.rrect((48, 42, 80, 92), 4)
+                  p.rrect((44, 94, 84, 104), 3)
+              elif name == "shoot_alt":
+                  p.ell((34, 34, 94, 94), fill=False, w=6)
+                  p.line([(64, 20), (64, 48)], 6); p.line([(64, 80), (64, 108)], 6)
+                  p.line([(20, 64), (48, 64)], 6); p.line([(80, 64), (108, 64)], 6)
+                  p.ell((58, 58, 70, 70))
+              elif name == "zoom":
+                  p.ell((30, 28, 78, 76), fill=False, w=8)
+                  p.line([(72, 70), (98, 98)], 10)
+                  p.line([(54, 40), (54, 64)], 5); p.line([(42, 52), (66, 52)], 5)
+              elif name == "speed":
+                  p.ell((30, 68, 52, 102)); p.rrect((30, 58, 52, 72), 7)
+                  p.ell((76, 28, 98, 62)); p.rrect((76, 20, 98, 34), 7)
+              elif name == "load":
+                  p.rrect((26, 40, 102, 100), 6)
+                  p.rrect((26, 32, 58, 48), 4)
+                  p.erase_rrect((34, 54, 94, 94), 3)
+                  p.poly([(64, 58), (82, 78), (46, 78)]); p.rrect((58, 76, 70, 92), 2)
+              elif name == "save":
+                  p.rrect((28, 28, 100, 100), 6)
+                  p.erase_rrect((40, 28, 84, 54), 2)
+                  p.rrect((70, 32, 80, 50), 1)
+                  p.erase_rrect((38, 68, 90, 100), 3)
+                  p.rrect((42, 72, 86, 96), 2)
+              elif name == "reload":
+                  p.arc((32, 32, 96, 96), 40, 330, 9)
+                  p.poly([(84, 18), (110, 40), (78, 52)])
+              elif name == "flash_light_filled":
+                  p.poly([(40, 30), (88, 30), (80, 52), (48, 52)])
+                  p.rrect((52, 52, 76, 106), 5)
+                  p.line([(64, 14), (64, 22)], 5); p.line([(28, 22), (36, 30)], 5); p.line([(100, 22), (92, 30)], 5)
+              elif name == "next_weap":
+                  p.poly([(30, 36), (70, 64), (30, 92)]); p.poly([(64, 36), (104, 64), (64, 92)])
+              elif name == "prev_weap":
+                  p.poly([(98, 36), (58, 64), (98, 92)]); p.poly([(64, 36), (24, 64), (64, 92)])
+              elif name == "settings":
+                  for i in range(8):
+                      a = math.radians(i * 45)
+                      cx, cy = 64 + 34 * math.cos(a), 64 + 34 * math.sin(a)
+                      dx, dy = math.cos(a), math.sin(a)
+                      nx, ny = -dy, dx
+                      p.poly([(cx - nx * 8 - dx * 8, cy - ny * 8 - dy * 8), (cx + nx * 8 - dx * 8, cy + ny * 8 - dy * 8),
+                              (cx + nx * 8 + dx * 8, cy + ny * 8 + dy * 8), (cx - nx * 8 + dx * 8, cy - ny * 8 + dy * 8)])
+                  p.ell((34, 34, 94, 94))
+                  p.d.ellipse([50 * K, 50 * K, 78 * K, 78 * K], fill=(255, 255, 255, 0))
+              elif name == "menu":
+                  for y in (40, 58, 76):
+                      p.rrect((32, y, 96, y + 11), 5)
               elif name == "back":
-                  d.polygon([(80, 30), (44, 64), (80, 98), (80, 82), (62, 64), (80, 46)], fill=(255, 255, 255, 255))
-              else:
-                  t = LABELS[name]
-                  f = fit_font(d, t, 88)
-                  w = d.textlength(t, font=f)
-                  bbox = d.textbbox((0, 0), t, font=f)
-                  h = bbox[3] - bbox[1]
-                  d.text(((S - w) / 2, (S - h) / 2 - bbox[1]), t, font=f, fill=(255, 255, 255, 255))
-              return im
+                  p.line([(78, 28), (42, 64), (78, 100)], 11)
+              elif name == "cs_buy":
+                  p.ell((24, 24, 104, 104), fill=False, w=7)
+                  p.text("$", 64, 62, 66)
+              elif name == "cs_autobuy":
+                  p.line([(22, 34), (38, 34), (48, 78), (92, 78)], 7)
+                  p.poly([(40, 44), (100, 44), (92, 70), (46, 70)])
+                  p.ell((46, 88, 62, 104)); p.ell((78, 88, 94, 104))
+              elif name in ("cs_radio1", "cs_radio2", "cs_radio3"):
+                  walkie(p, name[-1])
+              elif name == "cs_score":
+                  p.rrect((30, 70, 48, 100), 3); p.rrect((55, 46, 73, 100), 3); p.rrect((80, 28, 98, 100), 3)
+              elif name == "cs_drop":
+                  p.rrect((24, 30, 86, 48), 4); p.rrect((24, 44, 52, 66), 4); p.rrect((62, 46, 72, 58), 3)
+                  p.line([(100, 32), (100, 84)], 8)
+                  p.poly([(84, 78), (116, 78), (100, 104)])
+              elif name.startswith("n") and name[1:].isdigit():
+                  p.text(name[1:], 64, 64, 70)
+              return p.done()
+
+          NAMES = ["use", "jump", "shoot", "shoot_alt", "crouch", "tduck", "zoom", "speed", "load", "save", "reload",
+                   "flash_light_filled", "next_weap", "prev_weap", "settings", "menu", "back",
+                   "cs_buy", "cs_autobuy", "cs_radio1", "cs_radio2", "cs_radio3", "cs_score", "cs_drop"] + ["n%d" % i for i in range(1, 10)]
 
           def write_vtf(path, im):
               data = im.convert("RGBA").tobytes()  # RGBA8888 = format 0
@@ -277,8 +371,8 @@ jobs:
           }
           '''
 
-          for n in list(LABELS) + ["menu", "back"]:
-              write_vtf(os.path.join(OUT, n + ".vtf"), make(n))
+          for n in NAMES:
+              write_vtf(os.path.join(OUT, n + ".vtf"), icon(n))
               open(os.path.join(OUT, n + ".vmt"), "w").write(VMT % n)
           print("icons:", len(os.listdir(OUT)))
           ICONS_EOF
@@ -289,38 +383,38 @@ jobs:
           touch_removeall
           touch_addbutton "look" "" "_look" 0.5 0 1 1
           touch_addbutton "move" "" "_move" 0 0 0.5 1
-          touch_addbutton "use" "vgui/touch/use" "+use" 0.880000 0.213333 1.000000 0.213333 255 255 255 155 0 1.070000
-          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.462222 1.000000 0.462222 255 255 255 155 0 1.070000
-          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 155 0 1.070000
-          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 155 0 1.070000
-          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 155 0 1.070000
-          touch_addbutton "tduck" "vgui/touch/tduck" ";+duck" 0.560000 0.817778 0.620000 0.817778 255 255 255 155 0 1.070000
-          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 155 0 1.070000
-          touch_addbutton "speed" "vgui/touch/speed" "+speed" 0.180000 0.568889 0.280000 0.568889 255 255 255 155 0 1.070000
-          touch_addbutton "loadquick" "vgui/touch/load" "load quick" 0.760000 0.000000 0.840000 0.000000 255 255 255 155 0 1.070000
-          touch_addbutton "savequick" "vgui/touch/save" "save quick" 0.840000 0.000000 0.920000 0.000000 255 255 255 155 0 1.070000
-          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 155 0 1.070000
-          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 155 0 1.070000
-          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.533333 0.120000 0.533333 255 255 255 155 0 1.070000
-          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.071111 0.120000 0.071111 255 255 255 155 0 1.070000
-          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 155 0 1.070000
-          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 155 0 1.070000
-          touch_addbutton "cs_buy" "vgui/touch/cs_buy" "buy" 0.090000 0.000000 0.150000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "cs_autobuy" "vgui/touch/cs_autobuy" "autobuy" 0.150000 0.000000 0.210000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "cs_radio1" "vgui/touch/cs_radio1" "radio1" 0.210000 0.000000 0.270000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "cs_radio2" "vgui/touch/cs_radio2" "radio2" 0.270000 0.000000 0.330000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "cs_radio3" "vgui/touch/cs_radio3" "radio3" 0.330000 0.000000 0.390000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "cs_score" "vgui/touch/cs_score" "+showscores" 0.500000 0.000000 0.560000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "cs_drop" "vgui/touch/cs_drop" "drop" 0.560000 0.000000 0.620000 0.000000 255 255 255 155 0 1.000000
-          touch_addbutton "n1" "vgui/touch/n1" "menuselect 1" 0.300000 0.915000 0.348000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n2" "vgui/touch/n2" "menuselect 2" 0.350000 0.915000 0.398000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n3" "vgui/touch/n3" "menuselect 3" 0.400000 0.915000 0.448000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n4" "vgui/touch/n4" "menuselect 4" 0.450000 0.915000 0.498000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n5" "vgui/touch/n5" "menuselect 5" 0.500000 0.915000 0.548000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n6" "vgui/touch/n6" "menuselect 6" 0.550000 0.915000 0.598000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n7" "vgui/touch/n7" "menuselect 7" 0.600000 0.915000 0.648000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n8" "vgui/touch/n8" "menuselect 8" 0.650000 0.915000 0.698000 0.915000 255 255 255 130 0 1.000000
-          touch_addbutton "n9" "vgui/touch/n9" "menuselect 9" 0.700000 0.915000 0.748000 0.915000 255 255 255 130 0 1.000000
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "tduck" "vgui/touch/tduck" ";+duck" 0.560000 0.817778 0.620000 0.817778 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "speed" "vgui/touch/speed" "+speed" 0.180000 0.568889 0.280000 0.568889 255 255 255 115 0 1.070000
+          touch_addbutton "loadquick" "vgui/touch/load" "load quick" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "savequick" "vgui/touch/save" "save quick" 0.840000 0.000000 0.920000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.533333 0.120000 0.533333 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.071111 0.120000 0.071111 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "cs_buy" "vgui/touch/cs_buy" "buy" 0.090000 0.000000 0.150000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_autobuy" "vgui/touch/cs_autobuy" "autobuy" 0.150000 0.000000 0.210000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio1" "vgui/touch/cs_radio1" "radio1" 0.210000 0.000000 0.270000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio2" "vgui/touch/cs_radio2" "radio2" 0.270000 0.000000 0.330000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio3" "vgui/touch/cs_radio3" "radio3" 0.330000 0.000000 0.390000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_score" "vgui/touch/cs_score" "+showscores" 0.500000 0.000000 0.560000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_drop" "vgui/touch/cs_drop" "drop" 0.560000 0.000000 0.620000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "n1" "vgui/touch/n1" "menuselect 1" 0.300000 0.915000 0.348000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n2" "vgui/touch/n2" "menuselect 2" 0.350000 0.915000 0.398000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n3" "vgui/touch/n3" "menuselect 3" 0.400000 0.915000 0.448000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n4" "vgui/touch/n4" "menuselect 4" 0.450000 0.915000 0.498000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n5" "vgui/touch/n5" "menuselect 5" 0.500000 0.915000 0.548000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n6" "vgui/touch/n6" "menuselect 6" 0.550000 0.915000 0.598000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n7" "vgui/touch/n7" "menuselect 7" 0.600000 0.915000 0.648000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n8" "vgui/touch/n8" "menuselect 8" 0.650000 0.915000 0.698000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n9" "vgui/touch/n9" "menuselect 9" 0.700000 0.915000 0.748000 0.915000 255 255 255 100 0 1.000000
           CFG_EOF
       - uses: actions/setup-java@v4
         with:
@@ -530,6 +624,9 @@ jobs:
                 '\tQ_snprintf(buf, sizeof buf, "cfg/%s", defcfg);\n')
           n2 = '\t\tQ_snprintf(buf, sizeof buf, "exec %s", defcfg);\n'
           s = s.replace(o1, n1, 1).replace(o2, n2, 1)
+          assert s.count('rgba_t color(255, 255, 255, 155);') == 2
+          s = s.replace('rgba_t color(255, 255, 255, 155);', 'rgba_t color(255, 255, 255, 115);')
+          s = s.replace('rgba_t color(255, 255, 255, 155);', 'rgba_t color(255, 255, 255, 105);')
           open(p, "w").write(s)
           PY
           grep -n "defcfg" engine/game/client/touch.cpp
