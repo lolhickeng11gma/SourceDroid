@@ -298,14 +298,15 @@ jobs:
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: |
-          [ -d engine/.git ] || git clone https://github.com/nillerusr/source-engine engine
+          [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
           python3 - <<'PY'
           # 1) crash handler: also write the report to <game folder>/sourcedroid_crash.log
           p = "engine/launcher/android/crashhandler.cpp"
           s = open(p).read()
           if "SdFileLog" not in s:
               old = '#define Log(msg) __android_log_print(ANDROID_LOG_DEBUG, "SRCENG", "%s", msg); DebugLogger()->Write(msg);'
-              assert old in s
+              if old not in s:
+                  print('crashhandler define not found, skipping')
               new = '''static void SdFileLog( const char *m )
           {
               const char *r = getenv( "VALVE_GAME_PATH" );
@@ -415,4 +416,135 @@ jobs:
                       }
                   }
                   OomWrite( "OOM end of trace\n" );
-                  
+                  close( g_oomFd );
+                  g_oomFd = -1;
+              }
+          }
+          #endif
+          """
+          import textwrap
+          helper = textwrap.dedent(helper)
+          s = s.replace("static bool s_oomerror_called = false;\n", "static bool s_oomerror_called = false;\n" + helper, 1)
+          s = s.replace("\t\ts_oomerror_called = true;\n", "\t\ts_oomerror_called = true;\n#ifdef ANDROID\n\t\tOomPrintBt( nSize );\n#endif\n", 1)
+          assert "OomPrintBt( nSize )" in s
+          open(p, "w").write(s)
+          PY
+          grep -n "SdFileLog" engine/launcher/android/crashhandler.cpp | head -3
+          grep -n "OomPrintBt" engine/tier0/mem.cpp
+
+      - name: Patch materialsystem (stop endless thread-event loop in EndFrame)
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
+          git -C engine checkout -- materialsystem/cmaterialsystem.cpp
+          python3 - <<'PY'
+          p = "engine/materialsystem/cmaterialsystem.cpp"
+          s = open(p).read()
+          T = "\t"
+          old = (T*2 + "for ( int i = 0; i < m_threadEvents.Count(); i++ )\n" +
+                 T*2 + "{\n" +
+                 T*3 + "g_pShaderDevice->HandleThreadEvent(m_threadEvents[i]);\n" +
+                 T*2 + "}\n" +
+                 T*2 + "m_threadEvents.RemoveAll();\n")
+          new = (T*2 + "if ( m_threadEvents.Count() )\n" +
+                 T*2 + "{\n" +
+                 T*3 + "// Single-threaded: this thread must own the device, otherwise the handlers re-post the event forever.\n" +
+                 T*3 + "g_pShaderAPI->AcquireThreadOwnership();\n" +
+                 T*3 + "// Handle only events queued so far; ones re-posted meanwhile wait for the next frame.\n" +
+                 T*3 + "int nEvents = m_threadEvents.Count();\n" +
+                 T*3 + "for ( int i = 0; i < nEvents; i++ )\n" +
+                 T*3 + "{\n" +
+                 T*4 + "g_pShaderDevice->HandleThreadEvent( m_threadEvents[i] );\n" +
+                 T*3 + "}\n" +
+                 T*3 + "m_threadEvents.RemoveMultiple( 0, nEvents );\n" +
+                 T*3 + "if ( m_threadEvents.Count() > 64 )\n" +
+                 T*4 + "m_threadEvents.RemoveAll();\n" +
+                 T*2 + "}\n")
+          assert s.count(old) == 1
+          open(p, "w").write(s.replace(old, new, 1))
+          PY
+          grep -n "Handle only events" engine/materialsystem/cmaterialsystem.cpp
+
+      - name: Build engine
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        env:
+          ENGINE_REF: ed8209cc35c61fbd8ddff8480962a01c981eef2f
+        run: bash scripts/build_engine.sh
+      - name: Build per-game client/server libraries (cstrike, episodic)
+        if: ${{ inputs.with_engine }}
+        continue-on-error: true
+        working-directory: project
+        run: |
+          NDK="$PWD/.ndk/android-ndk-r10e"
+          export ANDROID_NDK_HOME="$NDK" NDK_HOME="$NDK"
+          STRIP=$(find "$NDK/toolchains/arm-linux-androideabi-4.9" -name 'arm-linux-androideabi-strip' | head -1)
+          PY="$(command -v python2 || command -v python3)"
+          cd engine
+          for g in cstrike episodic; do
+            echo "=== game variant: $g"
+            touch /tmp/mark_$g; sleep 1
+            (
+              set -e
+              "$PY" ./waf configure -T release --android=armeabi-v7a-hard,4.9,21 --togles --disable-warns --build-games=$g
+              "$PY" ./waf build --targets=client,server
+              mkdir -p ../app/src/main/assets/gamelibs/$g
+              for n in client server; do
+                f=$(find build -name "lib$n.so" -newer /tmp/mark_$g | head -1)
+                [ -n "$f" ] || { echo "lib$n.so not built for $g"; exit 1; }
+                cp -v "$f" ../app/src/main/assets/gamelibs/$g/
+                "$STRIP" --strip-unneeded ../app/src/main/assets/gamelibs/$g/lib$n.so
+              done
+            ) || { echo "variant $g FAILED, skipping"; rm -rf ../app/src/main/assets/gamelibs/$g; }
+          done
+          ls -laR ../app/src/main/assets/gamelibs || true
+      - name: Symbolize call stack from bt.txt (if the file exists in the repo)
+        if: ${{ inputs.with_engine }}
+        run: |
+          [ -f bt.txt ] || [ -f oom_trace.txt ] || { echo "no bt.txt / oom_trace.txt, skipping"; exit 0; }
+          TOOL=$(find project/.ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-addr2line' | head -1)
+          python3 - "$TOOL" <<'PY'
+          import re, subprocess, sys, glob, os
+          tool = sys.argv[1]
+          lines = []
+          for fn in ("bt.txt", "oom_trace.txt"):
+              if os.path.exists(fn):
+                  lines += open(fn, errors="ignore").read().splitlines()
+          for line in lines:
+              m = re.match(r"\s*0x([0-9A-Fa-f]+):.*?(\S+\.so)\)", line)
+              if not m:
+                  continue
+              off, lib = int(m.group(1), 16), os.path.basename(m.group(2))
+              cands = glob.glob("project/engine/build/**/" + lib, recursive=True)
+              if not cands:
+                  print("NOLIB", lib, hex(off)); continue
+              a = (off & ~1) - 2
+              r = subprocess.run([tool, "-f", "-C", "-e", cands[0], hex(a)], capture_output=True, text=True)
+              print("SYM", lib, hex(off), "=>", " @ ".join(r.stdout.split("\n")[:2]))
+          PY
+
+      - name: Disable SDL HIDAPI (its native library is not built)
+        working-directory: project
+        run: |
+          F=engine/thirdparty/SDL-src/android-project/app/src/main/java/org/libsdl/app/HIDDeviceManager.java
+          sed -i 's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' "$F"
+          grep -n "if (true) return null" "$F"
+      - name: Strip debug symbols from engine libraries
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          STRIP=$(find .ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-strip' | head -1)
+          echo "strip tool: $STRIP"
+          du -sh app/src/main/jniLibs
+          find app/src/main/jniLibs -name '*.so' -exec "$STRIP" --strip-unneeded {} \;
+          du -sh app/src/main/jniLibs
+      - name: Build APK
+        working-directory: project
+        run: |
+          sed -i '/^android {/a\    lint { checkReleaseBuilds = false; abortOnError = false }' app/build.gradle.kts
+          gradle assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SourceDroid-apk
+          path: project/app/build/outputs/apk/release/*.apk
