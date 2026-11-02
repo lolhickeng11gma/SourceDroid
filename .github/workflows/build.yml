@@ -102,6 +102,8 @@ jobs:
                       g = g.toLowerCase();
                       if (g.equals("cstrike")) return "cstrike";
                       if (g.equals("episodic") || g.equals("ep2")) return "episodic";
+                      if (g.equals("portal")) return "portal";
+                      if (g.equals("hl2mp")) return "hl2mp";
                       return null;
                   }
                   return null;
@@ -185,6 +187,13 @@ jobs:
                       libs.add("launcher");
                   }
                   return libs.toArray(new String[0]);
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  // The engine keeps global state in its native libs; a fresh process is the only clean restart.
+                  android.os.Process.killProcess(android.os.Process.myPid());
               }
 
               @Override
@@ -321,6 +330,16 @@ jobs:
                               (cx + nx * 8 + dx * 8, cy + ny * 8 + dy * 8), (cx - nx * 8 + dx * 8, cy - ny * 8 + dy * 8)])
                   p.ell((34, 34, 94, 94))
                   p.d.ellipse([50 * K, 50 * K, 78 * K, 78 * K], fill=(255, 255, 255, 0))
+              elif name == "bhop":
+                  p.arc((20, 20, 108, 108), 30, 330, 6)
+                  p.poly([(96, 14), (118, 42), (84, 46)])
+                  chev(p, 64, 56, s=17, w=7); chev(p, 64, 78, s=17, w=7)
+              elif name in ("k_w", "k_a", "k_d"):
+                  p.text(name[-1].upper(), 64, 64, 74)
+              elif name == "lay_bhop":
+                  p.text("BHOP", 64, 64, 27)
+              elif name == "lay_std":
+                  p.text("STD", 64, 64, 33)
               elif name == "menu":
                   for y in (40, 58, 76):
                       p.rrect((32, y, 96, y + 11), 5)
@@ -347,7 +366,8 @@ jobs:
 
           NAMES = ["use", "jump", "shoot", "shoot_alt", "crouch", "tduck", "zoom", "speed", "load", "save", "reload",
                    "flash_light_filled", "next_weap", "prev_weap", "settings", "menu", "back",
-                   "cs_buy", "cs_autobuy", "cs_radio1", "cs_radio2", "cs_radio3", "cs_score", "cs_drop"] + ["n%d" % i for i in range(1, 10)]
+                   "cs_buy", "cs_autobuy", "cs_radio1", "cs_radio2", "cs_radio3", "cs_score", "cs_drop",
+                   "bhop", "k_w", "k_a", "k_d", "lay_bhop", "lay_std"] + ["n%d" % i for i in range(1, 10)]
 
           def write_vtf(path, im):
               data = im.convert("RGBA").tobytes()  # RGBA8888 = format 0
@@ -372,14 +392,14 @@ jobs:
           '''
 
           for n in NAMES:
-              write_vtf(os.path.join(OUT, n + ".vtf"), icon(n))
+            write_vtf(os.path.join(OUT, n + ".vtf"), icon(n))
               open(os.path.join(OUT, n + ".vmt"), "w").write(VMT % n)
           print("icons:", len(os.listdir(OUT)))
           ICONS_EOF
           python3 /tmp/touch_icons.py app/src/main/assets/extras/materials/vgui/touch
           mkdir -p app/src/main/assets/extras/cfg
-          cat > app/src/main/assets/extras/cfg/touch_default_cstrike.cfg <<'CFG_EOF'
-          // SourceDroid touch layout for Counter-Strike: Source
+          cat > app/src/main/assets/extras/cfg/touch_default.cfg <<'CFG0_EOF'
+          // SourceDroid touch layout: default
           touch_removeall
           touch_addbutton "look" "" "_look" 0.5 0 1 1
           touch_addbutton "move" "" "_move" 0 0 0.5 1
@@ -389,8 +409,8 @@ jobs:
           touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
           touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
           touch_addbutton "tduck" "vgui/touch/tduck" ";+duck" 0.560000 0.817778 0.620000 0.817778 255 255 255 115 0 1.070000
-          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
           touch_addbutton "speed" "vgui/touch/speed" "+speed" 0.180000 0.568889 0.280000 0.568889 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
           touch_addbutton "loadquick" "vgui/touch/load" "load quick" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
           touch_addbutton "savequick" "vgui/touch/save" "save quick" 0.840000 0.000000 0.920000 0.000000 255 255 255 115 0 1.070000
           touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
@@ -399,6 +419,28 @@ jobs:
           touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.071111 0.120000 0.071111 255 255 255 115 0 1.070000
           touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
           touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_bhop" "touch_layout bhop" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          CFG0_EOF
+          cat > app/src/main/assets/extras/cfg/touch_default_cstrike.cfg <<'CFG1_EOF'
+          // SourceDroid touch layout: cstrike
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0.5 0 1 1
+          touch_addbutton "move" "" "_move" 0 0 0.5 1
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "tduck" "vgui/touch/tduck" ";+duck" 0.560000 0.817778 0.620000 0.817778 255 255 255 115 0 1.070000
+          touch_addbutton "speed" "vgui/touch/speed" "+speed" 0.180000 0.568889 0.280000 0.568889 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.533333 0.120000 0.533333 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.071111 0.120000 0.071111 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_bhop" "touch_layout bhop" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
           touch_addbutton "cs_buy" "vgui/touch/cs_buy" "buy" 0.090000 0.000000 0.150000 0.000000 255 255 255 115 0 1.000000
           touch_addbutton "cs_autobuy" "vgui/touch/cs_autobuy" "autobuy" 0.150000 0.000000 0.210000 0.000000 255 255 255 115 0 1.000000
           touch_addbutton "cs_radio1" "vgui/touch/cs_radio1" "radio1" 0.210000 0.000000 0.270000 0.000000 255 255 255 115 0 1.000000
@@ -415,7 +457,76 @@ jobs:
           touch_addbutton "n7" "vgui/touch/n7" "menuselect 7" 0.600000 0.915000 0.648000 0.915000 255 255 255 100 0 1.000000
           touch_addbutton "n8" "vgui/touch/n8" "menuselect 8" 0.650000 0.915000 0.698000 0.915000 255 255 255 100 0 1.000000
           touch_addbutton "n9" "vgui/touch/n9" "menuselect 9" 0.700000 0.915000 0.748000 0.915000 255 255 255 100 0 1.000000
-          CFG_EOF
+          CFG1_EOF
+          cat > app/src/main/assets/extras/cfg/touch_default_bhop.cfg <<'CFG2_EOF'
+          // SourceDroid touch layout: bhop
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0 0 1 1
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "bhop" "vgui/touch/bhop" "touch_bhop" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.500000 0.000000 0.580000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "loadquick" "vgui/touch/load" "load quick" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "savequick" "vgui/touch/save" "save quick" 0.840000 0.000000 0.920000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.160000 0.070000 0.160000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.530000 0.070000 0.530000 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_std" "touch_layout default" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "key_w" "vgui/touch/k_w" "+forward" 0.170000 0.450000 0.290000 0.450000 255 255 255 115 0 1.000000
+          touch_addbutton "key_a" "vgui/touch/k_a" "+moveleft" 0.050000 0.670000 0.170000 0.670000 255 255 255 115 0 1.000000
+          touch_addbutton "key_d" "vgui/touch/k_d" "+moveright" 0.290000 0.670000 0.410000 0.670000 255 255 255 115 0 1.000000
+          CFG2_EOF
+          cat > app/src/main/assets/extras/cfg/touch_default_cstrike_bhop.cfg <<'CFG3_EOF'
+          // SourceDroid touch layout: cstrike bhop
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0 0 1 1
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "bhop" "vgui/touch/bhop" "touch_bhop" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.160000 0.070000 0.160000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.530000 0.070000 0.530000 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_std" "touch_layout default" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "key_w" "vgui/touch/k_w" "+forward" 0.170000 0.450000 0.290000 0.450000 255 255 255 115 0 1.000000
+          touch_addbutton "key_a" "vgui/touch/k_a" "+moveleft" 0.050000 0.670000 0.170000 0.670000 255 255 255 115 0 1.000000
+          touch_addbutton "key_d" "vgui/touch/k_d" "+moveright" 0.290000 0.670000 0.410000 0.670000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_buy" "vgui/touch/cs_buy" "buy" 0.090000 0.000000 0.150000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_autobuy" "vgui/touch/cs_autobuy" "autobuy" 0.150000 0.000000 0.210000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio1" "vgui/touch/cs_radio1" "radio1" 0.210000 0.000000 0.270000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio2" "vgui/touch/cs_radio2" "radio2" 0.270000 0.000000 0.330000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio3" "vgui/touch/cs_radio3" "radio3" 0.330000 0.000000 0.390000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_score" "vgui/touch/cs_score" "+showscores" 0.500000 0.000000 0.560000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_drop" "vgui/touch/cs_drop" "drop" 0.560000 0.000000 0.620000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "n1" "vgui/touch/n1" "menuselect 1" 0.300000 0.915000 0.348000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n2" "vgui/touch/n2" "menuselect 2" 0.350000 0.915000 0.398000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n3" "vgui/touch/n3" "menuselect 3" 0.400000 0.915000 0.448000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n4" "vgui/touch/n4" "menuselect 4" 0.450000 0.915000 0.498000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n5" "vgui/touch/n5" "menuselect 5" 0.500000 0.915000 0.548000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n6" "vgui/touch/n6" "menuselect 6" 0.550000 0.915000 0.598000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n7" "vgui/touch/n7" "menuselect 7" 0.600000 0.915000 0.648000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n8" "vgui/touch/n8" "menuselect 8" 0.650000 0.915000 0.698000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n9" "vgui/touch/n9" "menuselect 9" 0.700000 0.915000 0.748000 0.915000 255 255 255 100 0 1.000000
+          CFG3_EOF
+          # engine activity runs in its own process (killed on exit -> no "shader api twice" on relaunch)
+          sed -i 's|android:name="com.valvesoftware.ValveActivity2"|android:name="com.valvesoftware.ValveActivity2"\n            android:process=":engine"|' app/src/main/AndroidManifest.xml
+          grep -n 'android:process' app/src/main/AndroidManifest.xml
+          # workshop: text search is query_type 12; ask for full details
+          sed -i 's|else 9 /\* text search \*/|else 12 /* text search */|' app/src/main/java/app/sourcedroid/workshop/WorkshopApi.kt
+          sed -i 's|&filetype=0"|\&filetype=0\&return_details=true"|' app/src/main/java/app/sourcedroid/workshop/WorkshopApi.kt
+          grep -n 'query_type\|return_details' app/src/main/java/app/sourcedroid/workshop/WorkshopApi.kt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -518,7 +629,6 @@ jobs:
                   char line[900];
                   snprintf( line, sizeof line, "OOM: failed allocation of %u bytes (file %s)\n", (unsigned)nSize, paths[k] );
                   OomWrite( line );
-                  int hits = 0;
                   for ( int i = 0; i < maxWords && hits < 120; i++ )
                   {
                       uintptr_t v = sp[i];
@@ -603,33 +713,136 @@ jobs:
           PY
           grep -n "Handle only events" engine/materialsystem/cmaterialsystem.cpp
 
-      - name: Patch touch defaults (per-game touch_default_<game>.cfg)
+      - name: Patch touch controls (per-game layouts, bhop, layout switch)
         if: ${{ inputs.with_engine }}
         working-directory: project
         run: |
           [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
-          git -C engine checkout -- game/client/touch.cpp
           python3 - <<'PY'
+          import subprocess
+          subprocess.call(["git", "-C", "engine", "checkout", "--", "game/client/touch.cpp", "game/client/in_main.cpp"])
+
+          T = "\t"
+
+          # ---------------- touch.cpp ----------------
           p = "engine/game/client/touch.cpp"
           s = open(p).read()
-          o1 = '\tQ_snprintf(buf, sizeof buf, "cfg/%s", TOUCH_DEFAULT_CFG);\n'
-          o2 = '\t\tQ_snprintf(buf, sizeof buf, "exec %s", TOUCH_DEFAULT_CFG);\n'
+
+          # 1) default layout file: touch_default_<game><suffix>.cfg -> touch_default<suffix>.cfg -> touch_default_<game>.cfg -> touch_default.cfg
+          o1 = T + 'Q_snprintf(buf, sizeof buf, "cfg/%s", TOUCH_DEFAULT_CFG);\n'
+          o2 = T*2 + 'Q_snprintf(buf, sizeof buf, "exec %s", TOUCH_DEFAULT_CFG);\n'
           assert s.count(o1) == 1 and s.count(o2) == 1
-          n1 = ('\tchar defcfg[96];\n'
-                '\tQ_snprintf(defcfg, sizeof defcfg, "touch_default_%s.cfg", V_UnqualifiedFileName( engine->GetGameDirectory() ));\n'
-                '\tQ_strlower( defcfg );\n'
-                '\tQ_snprintf(buf, sizeof buf, "cfg/%s", defcfg);\n'
-                '\tif( !filesystem->FileExists(buf) )\n'
-                '\t\tQ_strncpy( defcfg, TOUCH_DEFAULT_CFG, sizeof defcfg );\n'
-                '\tQ_snprintf(buf, sizeof buf, "cfg/%s", defcfg);\n')
-          n2 = '\t\tQ_snprintf(buf, sizeof buf, "exec %s", defcfg);\n'
+          n1 = "\n".join([
+              T + 'char defcfg[96];',
+              T + '{',
+              T*2 + 'char gd[64], sfx[48], cand[3][96];',
+              T*2 + 'Q_strncpy( gd, V_UnqualifiedFileName( engine->GetGameDirectory() ), sizeof gd );',
+              T*2 + 'Q_strlower( gd );',
+              T*2 + 'sfx[0] = 0;',
+              T*2 + 'if( !Q_strnicmp( touch_config_file.GetString(), "touch_", 6 ) )',
+              T*2 + '{',
+              T*3 + 'Q_strncpy( sfx, touch_config_file.GetString() + 5, sizeof sfx );',
+              T*3 + 'char *dot = Q_strrchr( sfx, \'.\' );',
+              T*3 + 'if( dot ) *dot = 0;',
+              T*3 + 'Q_strlower( sfx );',
+              T*2 + '}',
+              T*2 + 'Q_snprintf( cand[0], sizeof cand[0], "touch_default_%s%s.cfg", gd, sfx );',
+              T*2 + 'Q_snprintf( cand[1], sizeof cand[1], "touch_default%s.cfg", sfx );',
+              T*2 + 'Q_snprintf( cand[2], sizeof cand[2], "touch_default_%s.cfg", gd );',
+              T*2 + 'Q_strncpy( defcfg, TOUCH_DEFAULT_CFG, sizeof defcfg );',
+              T*2 + 'for( int i = 0; i < 3; i++ )',
+              T*2 + '{',
+              T*3 + 'Q_snprintf( buf, sizeof buf, "cfg/%s", cand[i] );',
+              T*3 + 'if( filesystem->FileExists( buf ) ) { Q_strncpy( defcfg, cand[i], sizeof defcfg ); break; }',
+              T*2 + '}',
+              T + '}',
+              T + 'Q_snprintf(buf, sizeof buf, "cfg/%s", defcfg);',
+          ]) + "\n"
+          n2 = T*2 + 'Q_snprintf(buf, sizeof buf, "exec %s", defcfg);\n'
           s = s.replace(o1, n1, 1).replace(o2, n2, 1)
+
+          # 2) more transparent default buttons
           assert s.count('rgba_t color(255, 255, 255, 155);') == 2
           s = s.replace('rgba_t color(255, 255, 255, 155);', 'rgba_t color(255, 255, 255, 115);')
-          s = s.replace('rgba_t color(255, 255, 255, 155);', 'rgba_t color(255, 255, 255, 105);')
+
+          # 3) layout switching + bhop toggle, placed before ResetToDefaults
+          anchor = 'void CTouchControls::ResetToDefaults()\n'
+          assert s.count(anchor) == 1
+          helper = "\n".join([
+              'bool g_bTouchBhop = false;',
+              'CON_COMMAND( touch_bhop, "toggle automatic jumping (bunny hop)" )',
+              '{',
+              T + 'g_bTouchBhop = !g_bTouchBhop;',
+              T + 'Msg( "touch_bhop %d\\n", g_bTouchBhop ? 1 : 0 );',
+              '}',
+              '',
+              'static char s_szSdLayout[64] = "";',
+              'static void SdSyncLayout()',
+              '{',
+              T + 'const char *cur = touch_config_file.GetString();',
+              T + 'if( !Q_stricmp( s_szSdLayout, cur ) )',
+              T*2 + 'return;',
+              T + 'bool bChanged = s_szSdLayout[0] != 0;',
+              T + 'Q_strncpy( s_szSdLayout, cur, sizeof s_szSdLayout );',
+              T + 'if( !bChanged )',
+              T*2 + 'return;',
+              T + 'char buf[256];',
+              T + 'Q_snprintf( buf, sizeof buf, "cfg/%s", cur );',
+              T + 'if( filesystem->FileExists( buf, "MOD" ) )',
+              T + '{',
+              T*2 + 'Q_snprintf( buf, sizeof buf, "exec %s\\n", cur );',
+              T*2 + 'engine->ExecuteClientCmd( buf );',
+              T + '}',
+              T + 'else',
+              T*2 + 'gTouch.ResetToDefaults();',
+              '}',
+              '',
+              'CON_COMMAND( touch_layout, "touch_layout <default|bhop|name>: switch touch button layout" )',
+              '{',
+              T + 'if( args.ArgC() < 2 )',
+              T + '{',
+              T*2 + 'Msg( "Usage: touch_layout <default|bhop|name>\\n" );',
+              T*2 + 'return;',
+              T + '}',
+              T + 'char file[64];',
+              T + 'if( !Q_stricmp( args[1], "default" ) )',
+              T*2 + 'Q_strncpy( file, "touch.cfg", sizeof file );',
+              T + 'else',
+              T*2 + 'Q_snprintf( file, sizeof file, "touch_%s.cfg", args[1] );',
+              T + 'touch_config_file.SetValue( file );',
+              T + 'SdSyncLayout();',
+              '}',
+              '',
+          ]) + "\n"
+          s = s.replace(anchor, helper + anchor, 1)
+
+          # 4) remember the layout loaded in Init, re-sync on every level start (config.cfg is read after Init)
+          o3 = T + 'CreateAtlasTexture();\n' + T + 'm_flHideTouch = 0.f;\n'
+          assert s.count(o3) == 1
+          s = s.replace(o3, T + 'Q_strncpy( s_szSdLayout, touch_config_file.GetString(), sizeof s_szSdLayout );\n' + o3, 1)
+          o4 = 'void CTouchControls::LevelInit()\n{\n'
+          assert s.count(o4) == 1
+          s = s.replace(o4, o4 + T + 'g_bTouchBhop = false;\n' + T + 'SdSyncLayout();\n', 1)
+          open(p, "w").write(s)
+
+          # ---------------- in_main.cpp: auto-jump ----------------
+          p = "engine/game/client/in_main.cpp"
+          s = open(p).read()
+          o5 = T + 'cmd->buttons = GetButtonBits( 0 );\n#endif\n'
+          assert s.count(o5) == 1
+          add = "\n".join([
+              T + 'extern bool g_bTouchBhop;',
+              T + 'if( g_bTouchBhop )',
+              T + '{',
+              T*2 + 'static bool s_bBhopPhase = false;',
+              T*2 + 's_bBhopPhase = !s_bBhopPhase;',
+              T*2 + 'if( s_bBhopPhase ) cmd->buttons |= IN_JUMP; else cmd->buttons &= ~IN_JUMP;',
+              T + '}',
+          ]) + "\n"
+          s = s.replace(o5, o5 + add, 1)
           open(p, "w").write(s)
           PY
-          grep -n "defcfg" engine/game/client/touch.cpp
+          grep -n "g_bTouchBhop\|SdSyncLayout" engine/game/client/touch.cpp engine/game/client/in_main.cpp | head
 
       - name: Build engine
         if: ${{ inputs.with_engine }}
@@ -637,7 +850,7 @@ jobs:
         env:
           ENGINE_REF: ed8209cc35c61fbd8ddff8480962a01c981eef2f
         run: bash scripts/build_engine.sh
-      - name: Build per-game client/server libraries (cstrike, episodic)
+      - name: Build per-game client/server libraries (cstrike, episodic, portal, hl2mp)
         if: ${{ inputs.with_engine }}
         continue-on-error: true
         working-directory: project
@@ -647,7 +860,7 @@ jobs:
           STRIP=$(find "$NDK/toolchains/arm-linux-androideabi-4.9" -name 'arm-linux-androideabi-strip' | head -1)
           PY="$(command -v python2 || command -v python3)"
           cd engine
-          for g in cstrike episodic; do
+          for g in cstrike episodic portal hl2mp; do
             echo "=== game variant: $g"
             touch /tmp/mark_$g; sleep 1
             (
@@ -708,6 +921,9 @@ jobs:
         working-directory: project
         run: |
           sed -i '/^android {/a\    lint { checkReleaseBuilds = false; abortOnError = false }' app/build.gradle.kts
+          sed -i 's/compileSdk = 34/compileSdk = 35/; s/targetSdk = 34/targetSdk = 35/' app/build.gradle.kts
+          echo 'android.suppressUnsupportedCompileSdk=35' >> gradle.properties
+          grep -n 'compileSdk\|targetSdk' app/build.gradle.kts
           gradle assembleRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
