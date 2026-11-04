@@ -1,0 +1,1095 @@
+name: Build APK
+on:
+  workflow_dispatch:
+    inputs:
+      with_engine:
+        description: "Build the Source engine into the APK (long)"
+        type: boolean
+        default: true
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack project
+        run: |
+          check() {
+            f="chunks/part$1.txt"
+            [ -f "$f" ] || { echo "ERROR: file $f is missing"; exit 1; }
+            h=$(tr -d ' \r\n\t' < "$f" | sha256sum | cut -d' ' -f1)
+            [ "$h" = "$2" ] || { echo "ERROR: file $f is damaged or incomplete, create it again"; exit 1; }
+          }
+          check 1 ec02df5874855ae519eeafea7dfa51a2f2daf384b692bf1fa3062d5c528b8156
+          check 2 7e60bf90484b4aa4fa521e04fad17a82ce2a66a6f81aeb8174dbc3c54130a128
+          check 3 22766befe8b5b26b90b1abef345dbd9e3af6e169a06c50773d4cd73896c18d7a
+          mkdir project
+          cat chunks/part*.txt | base64 -d | tar xJ -C project
+      - name: Patch app (HL1 movement switch in settings)
+        working-directory: project
+        run: |
+          base64 -d > /tmp/patch_app.py <<'APP_EOF'
+          IyBhZGRzIHRoZSAiSEwxIG1vdmVtZW50IiBzd2l0Y2ggdG8gdGhlIGFwcCBzZXR0aW5ncyAocHJv
+          amVjdC9hcHAvc3JjL21haW4vamF2YS9hcHAvc291cmNlZHJvaWQpCmJhc2UgPSAiYXBwL3NyYy9t
+          YWluL2phdmEvYXBwL3NvdXJjZWRyb2lkLyIKZGVmIGVkaXQoZiwgcGFpcnMpOgogICAgcyA9IG9w
+          ZW4oYmFzZSArIGYpLnJlYWQoKQogICAgZm9yIG9sZCwgbmV3IGluIHBhaXJzOgogICAgICAgIGFz
+          c2VydCBzLmNvdW50KG9sZCkgPT0gMSwgKGYsIG9sZCkKICAgICAgICBzID0gcy5yZXBsYWNlKG9s
+          ZCwgbmV3LCAxKQogICAgb3BlbihiYXNlICsgZiwgInciKS53cml0ZShzKQplZGl0KCJjb3JlL1Nl
+          dHRpbmdzLmt0IiwgWygKICAgICIgICAgdmFsIHJvb3Q6IEZpbGUgZ2V0KCkgPSBGaWxlKHJvb3RQ
+          YXRoKVxuIiwKICAgICIgICAgLyoqIEhMMS1zdHlsZSBtb3ZlbWVudCAoYnVubnkgaG9wIGdhaW5z
+          IHNwZWVkKS4gUGFzc2VkIHRvIHRoZSBnYW1lIGFzICtzZF9obDFtb3ZlLiAqL1xuIgogICAgIiAg
+          ICB2YXIgaGwxTW92ZW1lbnQ6IEJvb2xlYW5cbiIKICAgICIgICAgICAgIGdldCgpID0gcHJlZnMu
+          Z2V0Qm9vbGVhbihcImhsMV9tb3ZlXCIsIHRydWUpXG4iCiAgICAiICAgICAgICBzZXQodikgPSBw
+          cmVmcy5lZGl0KCkucHV0Qm9vbGVhbihcImhsMV9tb3ZlXCIsIHYpLmFwcGx5KClcblxuIgogICAg
+          IiAgICB2YWwgcm9vdDogRmlsZSBnZXQoKSA9IEZpbGUocm9vdFBhdGgpXG4iKV0pCmVkaXQoInVp
+          L01haW5BY3Rpdml0eS5rdCIsIFsKICAgICgiRW5naW5lQnJpZGdlLmxhdW5jaChjdHgsIHNldHRp
+          bmdzLnJvb3QsIGcsIGxhdW5jaEFyZ3MpIiwKICAgICAiRW5naW5lQnJpZGdlLmxhdW5jaChjdHgs
+          IHNldHRpbmdzLnJvb3QsIGcsIGxhdW5jaEFyZ3MgKyBcIiArc2RfaGwxbW92ZSBcIiArIChpZiAo
+          c2V0dGluZ3MuaGwxTW92ZW1lbnQpIFwiMVwiIGVsc2UgXCIwXCIpKSIpLAogICAgKCIgICAgICAg
+          IEJ1dHRvbihvbkNsaWNrID0ge1xuICAgICAgICAgICAgc2V0dGluZ3Mucm9vdFBhdGggPSBwYXRo
+          OyIsCiAgICAgIiAgICAgICAgdmFyIGhsMSBieSByZW1lbWJlciB7IG11dGFibGVTdGF0ZU9mKHNl
+          dHRpbmdzLmhsMU1vdmVtZW50KSB9XG4iCiAgICAgIiAgICAgICAgUm93KHZlcnRpY2FsQWxpZ25t
+          ZW50ID0gYW5kcm9pZHguY29tcG9zZS51aS5BbGlnbm1lbnQuQ2VudGVyVmVydGljYWxseSwgaG9y
+          aXpvbnRhbEFycmFuZ2VtZW50ID0gQXJyYW5nZW1lbnQuc3BhY2VkQnkoMTIuZHApKSB7XG4iCiAg
+          ICAgIiAgICAgICAgICAgIGFuZHJvaWR4LmNvbXBvc2UubWF0ZXJpYWwzLlN3aXRjaChjaGVja2Vk
+          ID0gaGwxLCBvbkNoZWNrZWRDaGFuZ2UgPSB7IGhsMSA9IGl0OyBzZXR0aW5ncy5obDFNb3ZlbWVu
+          dCA9IGl0IH0pXG4iCiAgICAgIiAgICAgICAgICAgIFRleHQoXCJITDEt0LTQstC40LbQtdC90LjQ
+          tSAo0LHRhdC+0L8g0YDQsNC30LPQvtC90Y/QtdGC0YHRjylcIilcbiIKICAgICAiICAgICAgICB9
+          XG4iCiAgICAgIiAgICAgICAgVGV4dChcItCS0LrQu9GO0YfQtdC90L46INGB0LrQvtGA0L7RgdGC
+          0Ywg0YDQsNGB0YLRkdGCINC/0YDQuCDQv9GA0YvQttC60LDRhSwg0LrQsNC6INCyIEhMMS4g0JLR
+          i9C60LvRjtGH0LXQvdC+OiDQvtGA0LjQs9C40L3QsNC70YzQvdC+0LUg0LTQstC40LbQtdC90LjQ
+          tS4g0J/RgNC40LzQtdC90Y/QtdGC0YHRjyDQv9GA0Lgg0YHQu9C10LTRg9GO0YnQtdC8INC30LDQ
+          v9GD0YHQutC1INC40LPRgNGLLlwiLCBzdHlsZSA9IE1hdGVyaWFsVGhlbWUudHlwb2dyYXBoeS5i
+          b2R5U21hbGwpXG4iCiAgICAgIiAgICAgICAgQnV0dG9uKG9uQ2xpY2sgPSB7XG4gICAgICAgICAg
+          ICBzZXR0aW5ncy5yb290UGF0aCA9IHBhdGg7IildKQpwcmludCgiYXBwIHBhdGNoZWQiKQo=
+          APP_EOF
+          python3 /tmp/patch_app.py
+
+      - name: Patch engine activity and add fonts
+        working-directory: project
+        run: |
+          cat > app/src/engine/java/com/valvesoftware/ValveActivity2.java <<'JAVA_EOF'
+          package com.valvesoftware;
+
+          import android.content.res.AssetManager;
+          import android.os.Bundle;
+
+          import org.libsdl.app.SDLActivity;
+
+          import java.io.BufferedReader;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.util.ArrayList;
+          import java.util.List;
+
+          /**
+           * Host activity for the nillerusr/source-engine Android port.
+           *
+           * The class name and the native methods are fixed by the engine (launcher/android/main.cpp).
+           * Env vars the engine reads: VALVE_GAME_PATH (game root), APP_LIB_PATH (native libs),
+           * APP_DATA_PATH (fonts are read from $APP_DATA_PATH/files/*.ttf).
+           */
+          public class ValveActivity2 extends SDLActivity {
+              private static native int setenv(String name, String value, int overwrite);
+              private static native void setArgs(String args);
+              public static native void nativeOnActivityResult(Object activity, int req, int res, Object data);
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  copyFonts();
+                  super.onCreate(savedInstanceState);
+                  String root = getIntent().getStringExtra("root");
+                  String[] args = getIntent().getStringArrayExtra("args");
+                  if (root == null) root = "";
+                  StringBuilder sb = new StringBuilder();
+                  if (args != null) for (String a : args) sb.append(a).append(' ');
+
+                  File files = getFilesDir();
+                  setenv("VALVE_GAME_PATH", root, 1);
+                  setenv("APP_DATA_PATH", files.getParent(), 1);
+                  setenv("APP_LIB_PATH", getApplicationInfo().nativeLibraryDir, 1);
+                  setenv("TMPDIR", getCacheDir().getAbsolutePath(), 1);
+
+                  // Touch-control materials (icons) shipped in assets/extras: the engine mounts this dir.
+                  try {
+                      File extras = copyAssetTree("extras", new File(files, "extras"));
+                      if (extras != null) setenv("EXTRAS_VPK_PATH", extras.getAbsolutePath() + "/", 1);
+                  } catch (Exception ignored) {
+                  }
+
+                  // Per-game client/server libraries (cs:s, episodic, ...) from assets/gamelibs/<variant>.
+                  String variant = pickVariant(args);
+                  if (variant != null) {
+                      try {
+                          File mod = copyAssetTree("gamelibs/" + variant, new File(files, "gamelibs/" + variant));
+                          if (mod != null) setenv("APP_MOD_LIB", mod.getAbsolutePath(), 1);
+                      } catch (Exception ignored) {
+                      }
+                  }
+                  setArgs(sb.toString().trim());
+              }
+
+              /** Maps "-game <dir>" to the name of the client/server variant, or null for the default (HL2) one. */
+              private static String pickVariant(String[] args) {
+                  if (args == null) return null;
+                  for (int i = 0; i + 1 < args.length; i++) {
+                      if (!"-game".equalsIgnoreCase(args[i])) continue;
+                      String g = args[i + 1].replace('\\', '/');
+                      int k = g.lastIndexOf('/');
+                      if (k >= 0) g = g.substring(k + 1);
+                      g = g.toLowerCase();
+                      if (g.equals("cstrike")) return "cstrike";
+                      if (g.equals("episodic") || g.equals("ep2")) return "episodic";
+                      if (g.equals("portal")) return "portal";
+                      if (g.equals("hl2mp")) return "hl2mp";
+                      return null;
+                  }
+                  return null;
+              }
+
+              /** Copies an assets subtree to dest (once per app version). Returns dest, or null if the asset dir is empty/missing. */
+              private File copyAssetTree(String assetPath, File dest) throws Exception {
+                  AssetManager am = getAssets();
+                  String[] top = am.list(assetPath);
+                  if (top == null || top.length == 0) return null;
+                  long stamp = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+                  File marker = new File(dest, ".stamp");
+                  if (marker.exists()) {
+                      try (BufferedReader r = new BufferedReader(new InputStreamReader(new java.io.FileInputStream(marker)))) {
+                          if (String.valueOf(stamp).equals(r.readLine())) return dest;
+                      } catch (Exception ignored) {
+                      }
+                  }
+                  copyAssetDir(am, assetPath, dest);
+                  try (OutputStream o = new FileOutputStream(marker)) {
+                      o.write(String.valueOf(stamp).getBytes());
+                  }
+                  return dest;
+              }
+
+              private void copyAssetDir(AssetManager am, String path, File dest) throws Exception {
+                  String[] kids = am.list(path);
+                  if (kids != null && kids.length > 0) {
+                      dest.mkdirs();
+                      for (String k : kids) copyAssetDir(am, path + "/" + k, new File(dest, k));
+                      return;
+                  }
+                  File parent = dest.getParentFile();
+                  if (parent != null) parent.mkdirs();
+                  if (dest.exists()) dest.setWritable(true);
+                  try (InputStream in = am.open(path); OutputStream o = new FileOutputStream(dest)) {
+                      byte[] buf = new byte[65536];
+                      int r;
+                      while ((r = in.read(buf)) > 0) o.write(buf, 0, r);
+                  }
+                  dest.setReadable(true, false);
+                  if (dest.getName().endsWith(".so")) dest.setReadOnly(); // Android 14: loaded code must not be writable
+              }
+
+              /** Copies assets/fonts/* into <app files dir>, where the engine looks for them. */
+              private void copyFonts() {
+                  try {
+                      AssetManager am = getAssets();
+                      String[] names = am.list("fonts");
+                      if (names == null) return;
+                      File dir = getFilesDir();
+                      for (String n : names) {
+                          File out = new File(dir, n);
+                          if (out.exists() && out.length() > 0) continue;
+                          try (InputStream in = am.open("fonts/" + n); OutputStream o = new FileOutputStream(out)) {
+                              byte[] buf = new byte[16384];
+                              int r;
+                              while ((r = in.read(buf)) > 0) o.write(buf, 0, r);
+                          }
+                      }
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              @Override
+              protected String[] getLibraries() {
+                  List<String> libs = new ArrayList<>();
+                  try {
+                      BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open("engine_libs.txt")));
+                      String line;
+                      while ((line = r.readLine()) != null) {
+                          line = line.trim();
+                          // client/server are loaded by the engine itself (per-game variants may replace them)
+                          if (line.equals("client") || line.equals("server")) continue;
+                          if (!line.isEmpty()) libs.add(line);
+                      }
+                      r.close();
+                  } catch (Exception e) {
+                      libs.clear();
+                      libs.add("SDL2");
+                      libs.add("launcher");
+                  }
+                  return libs.toArray(new String[0]);
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  // The engine keeps global state in its native libs; a fresh process is the only clean restart.
+                  android.os.Process.killProcess(android.os.Process.myPid());
+              }
+
+              @Override
+              protected String getMainFunction() {
+                  return "LauncherMainAndroid";
+              }
+          }
+          JAVA_EOF
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra fonts-liberation fonts-droid-fallback
+          mkdir -p app/src/main/assets/fonts
+          for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/truetype/dejavu/DejaVuSans-*.ttf; do
+            cp "$f" "app/src/main/assets/fonts/$(basename "$f" | tr 'A-Z' 'a-z')"
+          done
+          cp /usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf app/src/main/assets/fonts/
+          cp /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf app/src/main/assets/fonts/DroidSansFallback.ttf || true
+          ls -la app/src/main/assets/fonts
+          pip install --quiet --break-system-packages pillow || pip install --quiet pillow
+          tr -d ' \t\r\n' <<'B64_EOF' | base64 -d > /tmp/touch_icons.py
+          aW1wb3J0IG1hdGgsIG9zLCBzdHJ1Y3QsIHN5cwpmcm9tIFBJTCBpbXBvcnQgSW1hZ2UsIEltYWdl
+          RHJhdywgSW1hZ2VGb250CgpPVVQgPSBzeXMuYXJndlsxXSAgIyAuLi4vbWF0ZXJpYWxzL3ZndWkv
+          dG91Y2gKb3MubWFrZWRpcnMoT1VULCBleGlzdF9vaz1UcnVlKQpTID0gMTI4CksgPSA0ICAgICAg
+          ICAgICAgICAgICAgICAgICMgc3VwZXJzYW1wbGluZwpGT05UID0gIi91c3Ivc2hhcmUvZm9udHMv
+          dHJ1ZXR5cGUvZGVqYXZ1L0RlamFWdVNhbnMtQm9sZC50dGYiClcgPSAoMjU1LCAyNTUsIDI1NSwg
+          MjQwKSAgICMgaWNvbiBzdHJva2VzCkYgPSAoMjU1LCAyNTUsIDI1NSwgMjU1KQoKY2xhc3MgUDoK
+          ICAgIGRlZiBfX2luaXRfXyhzZWxmKToKICAgICAgICBzZWxmLmltID0gSW1hZ2UubmV3KCJSR0JB
+          IiwgKFMgKiBLLCBTICogSyksICgyNTUsIDI1NSwgMjU1LCAwKSkKICAgICAgICBzZWxmLmQgPSBJ
+          bWFnZURyYXcuRHJhdyhzZWxmLmltKQogICAgICAgIHNlbGYuZC5lbGxpcHNlKCg1ICogSywgNSAq
+          IEssIChTIC0gNikgKiBLLCAoUyAtIDYpICogSyksIGZpbGw9KDI1NSwgMjU1LCAyNTUsIDMwKSwg
+          b3V0bGluZT1XLCB3aWR0aD01ICogSykKICAgIGRlZiBfcChzZWxmLCBwdHMpOiByZXR1cm4gWyh4
+          ICogSywgeSAqIEspIGZvciB4LCB5IGluIHB0c10KICAgIGRlZiBsaW5lKHNlbGYsIHB0cywgdz03
+          KTogCiAgICAgICAgc2VsZi5kLmxpbmUoc2VsZi5fcChwdHMpLCBmaWxsPUYsIHdpZHRoPWludCh3
+          ICogSyksIGpvaW50PSJjdXJ2ZSIpCiAgICAgICAgZm9yIHgsIHkgaW4gcHRzWzoxXSArIHB0c1st
+          MTpdOgogICAgICAgICAgICByID0gdyAqIEsgLyAyCiAgICAgICAgICAgIHNlbGYuZC5lbGxpcHNl
+          KCh4ICogSyAtIHIsIHkgKiBLIC0gciwgeCAqIEsgKyByLCB5ICogSyArIHIpLCBmaWxsPUYpCiAg
+          ICBkZWYgcG9seShzZWxmLCBwdHMpOiBzZWxmLmQucG9seWdvbihzZWxmLl9wKHB0cyksIGZpbGw9
+          RikKICAgIGRlZiBycmVjdChzZWxmLCBiLCByPTQsIGZpbGw9VHJ1ZSwgdz01KToKICAgICAgICBi
+          YiA9IFt2ICogSyBmb3IgdiBpbiBiXQogICAgICAgIGlmIGZpbGw6IHNlbGYuZC5yb3VuZGVkX3Jl
+          Y3RhbmdsZShiYiwgcmFkaXVzPXIgKiBLLCBmaWxsPUYpCiAgICAgICAgZWxzZTogc2VsZi5kLnJv
+          dW5kZWRfcmVjdGFuZ2xlKGJiLCByYWRpdXM9ciAqIEssIG91dGxpbmU9Riwgd2lkdGg9aW50KHcg
+          KiBLKSkKICAgIGRlZiBlbGwoc2VsZiwgYiwgZmlsbD1UcnVlLCB3PTUpOgogICAgICAgIGJiID0g
+          W3YgKiBLIGZvciB2IGluIGJdCiAgICAgICAgaWYgZmlsbDogc2VsZi5kLmVsbGlwc2UoYmIsIGZp
+          bGw9RikKICAgICAgICBlbHNlOiBzZWxmLmQuZWxsaXBzZShiYiwgb3V0bGluZT1GLCB3aWR0aD1p
+          bnQodyAqIEspKQogICAgZGVmIGFyYyhzZWxmLCBiLCBhMCwgYTEsIHc9Nyk6CiAgICAgICAgc2Vs
+          Zi5kLmFyYyhbdiAqIEsgZm9yIHYgaW4gYl0sIGEwLCBhMSwgZmlsbD1GLCB3aWR0aD1pbnQodyAq
+          IEspKQogICAgZGVmIGVyYXNlX3JyZWN0KHNlbGYsIGIsIHI9Myk6CiAgICAgICAgc2VsZi5kLnJv
+          dW5kZWRfcmVjdGFuZ2xlKFt2ICogSyBmb3IgdiBpbiBiXSwgcmFkaXVzPXIgKiBLLCBmaWxsPSgy
+          NTUsIDI1NSwgMjU1LCAwKSkKICAgIGRlZiB0ZXh0KHNlbGYsIHQsIGN4LCBjeSwgc2l6ZSk6CiAg
+          ICAgICAgZiA9IEltYWdlRm9udC50cnVldHlwZShGT05ULCBpbnQoc2l6ZSAqIEspKQogICAgICAg
+          IGJiID0gc2VsZi5kLnRleHRiYm94KCgwLCAwKSwgdCwgZm9udD1mKQogICAgICAgIHNlbGYuZC50
+          ZXh0KChjeCAqIEsgLSAoYmJbMF0gKyBiYlsyXSkgLyAyLCBjeSAqIEsgLSAoYmJbMV0gKyBiYlsz
+          XSkgLyAyKSwgdCwgZm9udD1mLCBmaWxsPUYpCiAgICBkZWYgZG9uZShzZWxmKTogcmV0dXJuIHNl
+          bGYuaW0ucmVzaXplKChTLCBTKSwgSW1hZ2UuTEFOQ1pPUykKCmRlZiBjaGV2KHAsIGN4LCBjeSwg
+          dXA9VHJ1ZSwgdz03LCBzPTIwKToKICAgIGR5ID0gLXMgKiAwLjU1IGlmIHVwIGVsc2UgcyAqIDAu
+          NTUKICAgIHAubGluZShbKGN4IC0gcywgY3kgLSBkeSksIChjeCwgY3kgKyBkeSksIChjeCArIHMs
+          IGN5IC0gZHkpXSwgdykKCmRlZiB3YWxraWUocCwgZGlnaXQpOgogICAgcC5ycmVjdCgoNDQsIDQ2
+          LCA4NiwgMTA4KSwgOCkKICAgIHAucnJlY3QoKDcyLCAyMiwgODAsIDQ4KSwgMykKICAgIHAuZXJh
+          c2VfcnJlY3QoKDUxLCA1MywgNzksIDcwKSwgMykKICAgIHAudGV4dChkaWdpdCwgNjUsIDYxLjUs
+          IDE3KQogICAgZm9yIHkgaW4gKDgwLCA4OCwgOTYpOgogICAgICAgIHAuZXJhc2VfcnJlY3QoKDUy
+          LCB5LCA3OCwgeSArIDMuNSksIDEuNSkKCmRlZiBpY29uKG5hbWUpOgogICAgcCA9IFAoKQogICAg
+          aWYgbmFtZSA9PSAianVtcCI6CiAgICAgICAgY2hldihwLCA2NCwgNTIpOyBjaGV2KHAsIDY0LCA4
+          MCkKICAgIGVsaWYgbmFtZSA9PSAiY3JvdWNoIjoKICAgICAgICBjaGV2KHAsIDY0LCA0NiwgdXA9
+          RmFsc2UpOyBjaGV2KHAsIDY0LCA3NCwgdXA9RmFsc2UpCiAgICAgICAgcC5saW5lKFsoNDAsIDk4
+          KSwgKDg4LCA5OCldLCA2KQogICAgZWxpZiBuYW1lID09ICJ0ZHVjayI6CiAgICAgICAgY2hldihw
+          LCA2NCwgNTAsIHVwPUZhbHNlLCBzPTIyKQogICAgICAgIHAuZWxsKCg1MiwgNzYsIDc2LCAxMDAp
+          LCBmaWxsPUZhbHNlLCB3PTYpCiAgICAgICAgcC5lbGwoKDYwLCA4NCwgNjgsIDkyKSkKICAgIGVs
+          aWYgbmFtZSA9PSAidXNlIjoKICAgICAgICBmb3IgeCwgdG9wIGluICgoNDYsIDQ0KSwgKDU2LCAz
+          OCksICg2NiwgNDApLCAoNzYsIDQ4KSk6CiAgICAgICAgICAgIHAucnJlY3QoKHgsIHRvcCwgeCAr
+          IDksIDgyKSwgNC41KQogICAgICAgIHAucnJlY3QoKDQ0LCA2MCwgODUsIDEwMiksIDEyKQogICAg
+          ICAgIHAucnJlY3QoKDMyLCA2NiwgNDgsIDgwKSwgNykKICAgIGVsaWYgbmFtZSA9PSAic2hvb3Qi
+          OgogICAgICAgIHAucG9seShbKDY0LCAyNCksICg4MCwgNDYpLCAoNDgsIDQ2KV0pCiAgICAgICAg
+          cC5ycmVjdCgoNDgsIDQyLCA4MCwgOTIpLCA0KQogICAgICAgIHAucnJlY3QoKDQ0LCA5NCwgODQs
+          IDEwNCksIDMpCiAgICBlbGlmIG5hbWUgPT0gInNob290X2FsdCI6CiAgICAgICAgcC5lbGwoKDM0
+          LCAzNCwgOTQsIDk0KSwgZmlsbD1GYWxzZSwgdz02KQogICAgICAgIHAubGluZShbKDY0LCAyMCks
+          ICg2NCwgNDgpXSwgNik7IHAubGluZShbKDY0LCA4MCksICg2NCwgMTA4KV0sIDYpCiAgICAgICAg
+          cC5saW5lKFsoMjAsIDY0KSwgKDQ4LCA2NCldLCA2KTsgcC5saW5lKFsoODAsIDY0KSwgKDEwOCwg
+          NjQpXSwgNikKICAgICAgICBwLmVsbCgoNTgsIDU4LCA3MCwgNzApKQogICAgZWxpZiBuYW1lID09
+          ICJ6b29tIjoKICAgICAgICBwLmVsbCgoMzAsIDI4LCA3OCwgNzYpLCBmaWxsPUZhbHNlLCB3PTgp
+          CiAgICAgICAgcC5saW5lKFsoNzIsIDcwKSwgKDk4LCA5OCldLCAxMCkKICAgICAgICBwLmxpbmUo
+          Wyg1NCwgNDApLCAoNTQsIDY0KV0sIDUpOyBwLmxpbmUoWyg0MiwgNTIpLCAoNjYsIDUyKV0sIDUp
+          CiAgICBlbGlmIG5hbWUgPT0gInNwZWVkIjoKICAgICAgICBwLmVsbCgoMzAsIDY4LCA1MiwgMTAy
+          KSk7IHAucnJlY3QoKDMwLCA1OCwgNTIsIDcyKSwgNykKICAgICAgICBwLmVsbCgoNzYsIDI4LCA5
+          OCwgNjIpKTsgcC5ycmVjdCgoNzYsIDIwLCA5OCwgMzQpLCA3KQogICAgZWxpZiBuYW1lID09ICJs
+          b2FkIjoKICAgICAgICBwLnJyZWN0KCgyNiwgNDAsIDEwMiwgMTAwKSwgNikKICAgICAgICBwLnJy
+          ZWN0KCgyNiwgMzIsIDU4LCA0OCksIDQpCiAgICAgICAgcC5lcmFzZV9ycmVjdCgoMzQsIDU0LCA5
+          NCwgOTQpLCAzKQogICAgICAgIHAucG9seShbKDY0LCA1OCksICg4MiwgNzgpLCAoNDYsIDc4KV0p
+          OyBwLnJyZWN0KCg1OCwgNzYsIDcwLCA5MiksIDIpCiAgICBlbGlmIG5hbWUgPT0gInNhdmUiOgog
+          ICAgICAgIHAucnJlY3QoKDI4LCAyOCwgMTAwLCAxMDApLCA2KQogICAgICAgIHAuZXJhc2VfcnJl
+          Y3QoKDQwLCAyOCwgODQsIDU0KSwgMikKICAgICAgICBwLnJyZWN0KCg3MCwgMzIsIDgwLCA1MCks
+          IDEpCiAgICAgICAgcC5lcmFzZV9ycmVjdCgoMzgsIDY4LCA5MCwgMTAwKSwgMykKICAgICAgICBw
+          LnJyZWN0KCg0MiwgNzIsIDg2LCA5NiksIDIpCiAgICBlbGlmIG5hbWUgPT0gInJlbG9hZCI6CiAg
+          ICAgICAgcC5hcmMoKDMyLCAzMiwgOTYsIDk2KSwgNDAsIDMzMCwgOSkKICAgICAgICBwLnBvbHko
+          Wyg4NCwgMTgpLCAoMTEwLCA0MCksICg3OCwgNTIpXSkKICAgIGVsaWYgbmFtZSA9PSAiZmxhc2hf
+          bGlnaHRfZmlsbGVkIjoKICAgICAgICBwLnBvbHkoWyg0MCwgMzApLCAoODgsIDMwKSwgKDgwLCA1
+          MiksICg0OCwgNTIpXSkKICAgICAgICBwLnJyZWN0KCg1MiwgNTIsIDc2LCAxMDYpLCA1KQogICAg
+          ICAgIHAubGluZShbKDY0LCAxNCksICg2NCwgMjIpXSwgNSk7IHAubGluZShbKDI4LCAyMiksICgz
+          NiwgMzApXSwgNSk7IHAubGluZShbKDEwMCwgMjIpLCAoOTIsIDMwKV0sIDUpCiAgICBlbGlmIG5h
+          bWUgPT0gIm5leHRfd2VhcCI6CiAgICAgICAgcC5wb2x5KFsoMzAsIDM2KSwgKDcwLCA2NCksICgz
+          MCwgOTIpXSk7IHAucG9seShbKDY0LCAzNiksICgxMDQsIDY0KSwgKDY0LCA5MildKQogICAgZWxp
+          ZiBuYW1lID09ICJwcmV2X3dlYXAiOgogICAgICAgIHAucG9seShbKDk4LCAzNiksICg1OCwgNjQp
+          LCAoOTgsIDkyKV0pOyBwLnBvbHkoWyg2NCwgMzYpLCAoMjQsIDY0KSwgKDY0LCA5MildKQogICAg
+          ZWxpZiBuYW1lID09ICJzZXR0aW5ncyI6CiAgICAgICAgZm9yIGkgaW4gcmFuZ2UoOCk6CiAgICAg
+          ICAgICAgIGEgPSBtYXRoLnJhZGlhbnMoaSAqIDQ1KQogICAgICAgICAgICBjeCwgY3kgPSA2NCAr
+          IDM0ICogbWF0aC5jb3MoYSksIDY0ICsgMzQgKiBtYXRoLnNpbihhKQogICAgICAgICAgICBkeCwg
+          ZHkgPSBtYXRoLmNvcyhhKSwgbWF0aC5zaW4oYSkKICAgICAgICAgICAgbngsIG55ID0gLWR5LCBk
+          eAogICAgICAgICAgICBwLnBvbHkoWyhjeCAtIG54ICogOCAtIGR4ICogOCwgY3kgLSBueSAqIDgg
+          LSBkeSAqIDgpLCAoY3ggKyBueCAqIDggLSBkeCAqIDgsIGN5ICsgbnkgKiA4IC0gZHkgKiA4KSwK
+          ICAgICAgICAgICAgICAgICAgICAoY3ggKyBueCAqIDggKyBkeCAqIDgsIGN5ICsgbnkgKiA4ICsg
+          ZHkgKiA4KSwgKGN4IC0gbnggKiA4ICsgZHggKiA4LCBjeSAtIG55ICogOCArIGR5ICogOCldKQog
+          ICAgICAgIHAuZWxsKCgzNCwgMzQsIDk0LCA5NCkpCiAgICAgICAgcC5kLmVsbGlwc2UoWzUwICog
+          SywgNTAgKiBLLCA3OCAqIEssIDc4ICogS10sIGZpbGw9KDI1NSwgMjU1LCAyNTUsIDApKQogICAg
+          ZWxpZiBuYW1lID09ICJiaG9wIjoKICAgICAgICBwLmFyYygoMjAsIDIwLCAxMDgsIDEwOCksIDMw
+          LCAzMzAsIDYpCiAgICAgICAgcC5wb2x5KFsoOTYsIDE0KSwgKDExOCwgNDIpLCAoODQsIDQ2KV0p
+          CiAgICAgICAgY2hldihwLCA2NCwgNTYsIHM9MTcsIHc9Nyk7IGNoZXYocCwgNjQsIDc4LCBzPTE3
+          LCB3PTcpCiAgICBlbGlmIG5hbWUgaW4gKCJrX3ciLCAia19hIiwgImtfZCIpOgogICAgICAgIHAu
+          dGV4dChuYW1lWy0xXS51cHBlcigpLCA2NCwgNjQsIDc0KQogICAgZWxpZiBuYW1lID09ICJsYXlf
+          YmhvcCI6CiAgICAgICAgcC50ZXh0KCJCSE9QIiwgNjQsIDY0LCAyNykKICAgIGVsaWYgbmFtZSA9
+          PSAibGF5X3N0ZCI6CiAgICAgICAgcC50ZXh0KCJTVEQiLCA2NCwgNjQsIDMzKQogICAgZWxpZiBu
+          YW1lID09ICJzcHJpbnQiOgogICAgICAgIHAucG9seShbKDcyLCAxOCksICgzNiwgNzApLCAoNjAs
+          IDcwKSwgKDUwLCAxMTApLCAoOTIsIDUyKSwgKDY4LCA1MildKQogICAgZWxpZiBuYW1lID09ICJh
+          c3RyYWZlIjoKICAgICAgICBwLnRleHQoIkEiLCAzNiwgMzgsIDMwKTsgcC50ZXh0KCJEIiwgOTIs
+          IDM4LCAzMCkKICAgICAgICBwLmxpbmUoWygyNiwgNzgpLCAoMTAyLCA3OCldLCA2KQogICAgICAg
+          IHAucG9seShbKDE4LCA3OCksICg0MCwgNjQpLCAoNDAsIDkyKV0pOyBwLnBvbHkoWygxMTAsIDc4
+          KSwgKDg4LCA2NCksICg4OCwgOTIpXSkKICAgIGVsaWYgbmFtZSA9PSAidHVybjE4MCI6CiAgICAg
+          ICAgcC5hcmMoKDI0LCAyNCwgMTA0LCAxMDQpLCA0MCwgMzIwLCA3KQogICAgICAgIHAucG9seShb
+          KDk2LCAxNCksICgxMTgsIDQ0KSwgKDg0LCA0OCldKQogICAgICAgIHAudGV4dCgiMTgwIiwgNjQs
+          IDY0LCAyNikKICAgIGVsaWYgbmFtZSA9PSAiYmhvcGJvdCI6CiAgICAgICAgcC5hcmMoKDIyLCAy
+          MiwgMTA2LCAxMDYpLCAyMDAsIDM0MCwgNik7IHAuYXJjKCgyMiwgMjIsIDEwNiwgMTA2KSwgMjAs
+          IDE2MCwgNikKICAgICAgICBwLnBvbHkoWyg5OCwgMTIpLCAoMTE2LCA0MCksICg4NiwgNDApXSk7
+          IHAucG9seShbKDMwLCAxMTYpLCAoMTIsIDg4KSwgKDQyLCA4OCldKQogICAgICAgIHAudGV4dCgi
+          QVVUTyIsIDY0LCA2NCwgMjIpCiAgICBlbGlmIG5hbWUgPT0gImJvb3N0IjoKICAgICAgICBwLnBv
+          bHkoWyg2NCwgMTQpLCAoOTIsIDUyKSwgKDc0LCA1MiksICg3NCwgODQpLCAoNTQsIDg0KSwgKDU0
+          LCA1MiksICgzNiwgNTIpXSkKICAgICAgICBwLnBvbHkoWyg2NCwgMTE0KSwgKDM2LCA4MCksICg5
+          MiwgODApXSkKICAgICAgICBwLmxpbmUoWygzMCwgOTgpLCAoOTgsIDk4KV0sIDUpCiAgICBlbGlm
+          IG5hbWUgPT0gIm1lbnUiOgogICAgICAgIGZvciB5IGluICg0MCwgNTgsIDc2KToKICAgICAgICAg
+          ICAgcC5ycmVjdCgoMzIsIHksIDk2LCB5ICsgMTEpLCA1KQogICAgZWxpZiBuYW1lID09ICJiYWNr
+          IjoKICAgICAgICBwLmxpbmUoWyg3OCwgMjgpLCAoNDIsIDY0KSwgKDc4LCAxMDApXSwgMTEpCiAg
+          ICBlbGlmIG5hbWUgPT0gImNzX2J1eSI6CiAgICAgICAgcC5lbGwoKDI0LCAyNCwgMTA0LCAxMDQp
+          LCBmaWxsPUZhbHNlLCB3PTcpCiAgICAgICAgcC50ZXh0KCIkIiwgNjQsIDYyLCA2NikKICAgIGVs
+          aWYgbmFtZSA9PSAiY3NfYXV0b2J1eSI6CiAgICAgICAgcC5saW5lKFsoMjIsIDM0KSwgKDM4LCAz
+          NCksICg0OCwgNzgpLCAoOTIsIDc4KV0sIDcpCiAgICAgICAgcC5wb2x5KFsoNDAsIDQ0KSwgKDEw
+          MCwgNDQpLCAoOTIsIDcwKSwgKDQ2LCA3MCldKQogICAgICAgIHAuZWxsKCg0NiwgODgsIDYyLCAx
+          MDQpKTsgcC5lbGwoKDc4LCA4OCwgOTQsIDEwNCkpCiAgICBlbGlmIG5hbWUgaW4gKCJjc19yYWRp
+          bzEiLCAiY3NfcmFkaW8yIiwgImNzX3JhZGlvMyIpOgogICAgICAgIHdhbGtpZShwLCBuYW1lWy0x
+          XSkKICAgIGVsaWYgbmFtZSA9PSAiY3Nfc2NvcmUiOgogICAgICAgIHAucnJlY3QoKDMwLCA3MCwg
+          NDgsIDEwMCksIDMpOyBwLnJyZWN0KCg1NSwgNDYsIDczLCAxMDApLCAzKTsgcC5ycmVjdCgoODAs
+          IDI4LCA5OCwgMTAwKSwgMykKICAgIGVsaWYgbmFtZSA9PSAiY3NfZHJvcCI6CiAgICAgICAgcC5y
+          cmVjdCgoMjQsIDMwLCA4NiwgNDgpLCA0KTsgcC5ycmVjdCgoMjQsIDQ0LCA1MiwgNjYpLCA0KTsg
+          cC5ycmVjdCgoNjIsIDQ2LCA3MiwgNTgpLCAzKQogICAgICAgIHAubGluZShbKDEwMCwgMzIpLCAo
+          MTAwLCA4NCldLCA4KQogICAgICAgIHAucG9seShbKDg0LCA3OCksICgxMTYsIDc4KSwgKDEwMCwg
+          MTA0KV0pCiAgICBlbGlmIG5hbWUuc3RhcnRzd2l0aCgibiIpIGFuZCBuYW1lWzE6XS5pc2RpZ2l0
+          KCk6CiAgICAgICAgcC50ZXh0KG5hbWVbMTpdLCA2NCwgNjQsIDcwKQogICAgcmV0dXJuIHAuZG9u
+          ZSgpCgpOQU1FUyA9IFsidXNlIiwgImp1bXAiLCAic2hvb3QiLCAic2hvb3RfYWx0IiwgImNyb3Vj
+          aCIsICJ0ZHVjayIsICJ6b29tIiwgInNwZWVkIiwgImxvYWQiLCAic2F2ZSIsICJyZWxvYWQiLAog
+          ICAgICAgICAiZmxhc2hfbGlnaHRfZmlsbGVkIiwgIm5leHRfd2VhcCIsICJwcmV2X3dlYXAiLCAi
+          c2V0dGluZ3MiLCAibWVudSIsICJiYWNrIiwKICAgICAgICAgImNzX2J1eSIsICJjc19hdXRvYnV5
+          IiwgImNzX3JhZGlvMSIsICJjc19yYWRpbzIiLCAiY3NfcmFkaW8zIiwgImNzX3Njb3JlIiwgImNz
+          X2Ryb3AiLAogICAgICAgICAiYmhvcCIsICJrX3ciLCAia19hIiwgImtfZCIsICJsYXlfYmhvcCIs
+          ICJsYXlfc3RkIiwgInNwcmludCIsICJhc3RyYWZlIiwgInR1cm4xODAiLCAiYmhvcGJvdCIsICJi
+          b29zdCJdICsgWyJuJWQiICUgaSBmb3IgaSBpbiByYW5nZSgxLCAxMCldCgpkZWYgd3JpdGVfdnRm
+          KHBhdGgsIGltKToKICAgIGRhdGEgPSBpbS5jb252ZXJ0KCJSR0JBIikudG9ieXRlcygpICAjIFJH
+          QkE4ODg4ID0gZm9ybWF0IDAKICAgIGZsYWdzID0gMHg0IHwgMHg4IHwgMHgxMDAgfCAweDIwMCAg
+          ICAjIGNsYW1wIHMvdCwgbm8gbWlwLCBubyBsb2QKICAgIGhkciA9IHN0cnVjdC5wYWNrKCI8NHNJ
+          SUlISElISDRzM2Y0c2ZJQklCQkgiLAogICAgICAgICAgICAgICAgICAgICAgYiJWVEZcMCIsIDcs
+          IDIsIDgwLCBTLCBTLCBmbGFncywgMSwgMCwgYiJcMCIgKiA0LAogICAgICAgICAgICAgICAgICAg
+          ICAgMC41LCAwLjUsIDAuNSwgYiJcMCIgKiA0LCAxLjAsIDAsIDEsIDB4RkZGRkZGRkYsIDAsIDAs
+          IDEpCiAgICBoZHIgKz0gYiJcMCIgKiAoODAgLSBsZW4oaGRyKSkKICAgIHdpdGggb3BlbihwYXRo
+          LCAid2IiKSBhcyBmOgogICAgICAgIGYud3JpdGUoaGRyICsgZGF0YSkKClZNVCA9ICcnJyJVbmxp
+          dEdlbmVyaWMiCnsKXHQiJGJhc2V0ZXh0dXJlIiAidmd1aS90b3VjaC8lcyIKXHQiJHRyYW5zbHVj
+          ZW50IiAxClx0IiR2ZXJ0ZXhjb2xvciIgMQpcdCIkdmVydGV4YWxwaGEiIDEKXHQiJGlnbm9yZXoi
+          IDEKXHQiJG5vbG9kIiAxClx0IiRub21pcCIgMQp9CicnJwoKZm9yIG4gaW4gTkFNRVM6CiAgICB3
+          cml0ZV92dGYob3MucGF0aC5qb2luKE9VVCwgbiArICIudnRmIiksIGljb24obikpCiAgICBvcGVu
+          KG9zLnBhdGguam9pbihPVVQsIG4gKyAiLnZtdCIpLCAidyIpLndyaXRlKFZNVCAlIG4pCnByaW50
+          KCJpY29uczoiLCBsZW4ob3MubGlzdGRpcihPVVQpKSkK
+          B64_EOF
+          python3 /tmp/touch_icons.py app/src/main/assets/extras/materials/vgui/touch
+          mkdir -p app/src/main/assets/extras/cfg
+          cat > app/src/main/assets/extras/cfg/touch_default.cfg <<'CFG0_EOF'
+          // SourceDroid touch layout: default
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0.5 0 1 1
+          touch_addbutton "move" "" "_move" 0 0 0.5 1
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "tduck" "vgui/touch/tduck" ";+duck" 0.560000 0.817778 0.620000 0.817778 255 255 255 115 0 1.070000
+          touch_addbutton "speed" "vgui/touch/speed" "+speed" 0.180000 0.568889 0.280000 0.568889 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "loadquick" "vgui/touch/load" "load quick" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "savequick" "vgui/touch/save" "save quick" 0.840000 0.000000 0.920000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.533333 0.120000 0.533333 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.071111 0.120000 0.071111 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_bhop" "touch_layout bhop" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          CFG0_EOF
+          cat > app/src/main/assets/extras/cfg/touch_default_cstrike.cfg <<'CFG1_EOF'
+          // SourceDroid touch layout: cstrike
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0.5 0 1 1
+          touch_addbutton "move" "" "_move" 0 0 0.5 1
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "tduck" "vgui/touch/tduck" ";+duck" 0.560000 0.817778 0.620000 0.817778 255 255 255 115 0 1.070000
+          touch_addbutton "speed" "vgui/touch/speed" "+speed" 0.180000 0.568889 0.280000 0.568889 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.533333 0.120000 0.533333 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.071111 0.120000 0.071111 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_bhop" "touch_layout bhop" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_buy" "vgui/touch/cs_buy" "buy" 0.090000 0.000000 0.150000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_autobuy" "vgui/touch/cs_autobuy" "autobuy" 0.150000 0.000000 0.210000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio1" "vgui/touch/cs_radio1" "radio1" 0.210000 0.000000 0.270000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio2" "vgui/touch/cs_radio2" "radio2" 0.270000 0.000000 0.330000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio3" "vgui/touch/cs_radio3" "radio3" 0.330000 0.000000 0.390000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_score" "vgui/touch/cs_score" "+showscores" 0.500000 0.000000 0.560000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_drop" "vgui/touch/cs_drop" "drop" 0.560000 0.000000 0.620000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "n1" "vgui/touch/n1" "menuselect 1" 0.300000 0.915000 0.348000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n2" "vgui/touch/n2" "menuselect 2" 0.350000 0.915000 0.398000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n3" "vgui/touch/n3" "menuselect 3" 0.400000 0.915000 0.448000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n4" "vgui/touch/n4" "menuselect 4" 0.450000 0.915000 0.498000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n5" "vgui/touch/n5" "menuselect 5" 0.500000 0.915000 0.548000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n6" "vgui/touch/n6" "menuselect 6" 0.550000 0.915000 0.598000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n7" "vgui/touch/n7" "menuselect 7" 0.600000 0.915000 0.648000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n8" "vgui/touch/n8" "menuselect 8" 0.650000 0.915000 0.698000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n9" "vgui/touch/n9" "menuselect 9" 0.700000 0.915000 0.748000 0.915000 255 255 255 100 0 1.000000
+          CFG1_EOF
+          cat > app/src/main/assets/extras/cfg/touch_default_bhop.cfg <<'CFG2_EOF'
+          // SourceDroid touch layout: bhop
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0 0 1 1
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "bhop" "vgui/touch/bhop" "touch_bhop" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.500000 0.000000 0.580000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "loadquick" "vgui/touch/load" "load quick" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "savequick" "vgui/touch/save" "save quick" 0.840000 0.000000 0.920000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.160000 0.070000 0.160000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.530000 0.070000 0.530000 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_std" "touch_layout default" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "tduck" "vgui/touch/tduck" "touch_tduck" 0.440000 0.700000 0.520000 0.700000 255 255 255 115 0 1.000000
+          touch_addbutton "bhopbot" "vgui/touch/bhopbot" "touch_bhopbot" 0.640000 0.140000 0.720000 0.140000 255 255 255 115 0 1.000000
+          touch_addbutton "boost" "vgui/touch/boost" "touch_boost" 0.540000 0.470000 0.620000 0.470000 255 255 255 115 0 1.000000
+          touch_addbutton "turn180" "vgui/touch/turn180" "touch_turn180" 0.640000 0.300000 0.720000 0.300000 255 255 255 115 0 1.000000
+          touch_addbutton "astrafe" "vgui/touch/astrafe" "touch_autostrafe" 0.640000 0.470000 0.720000 0.470000 255 255 255 115 0 1.000000
+          touch_addbutton "sprint" "vgui/touch/sprint" "+speed" 0.640000 0.640000 0.720000 0.640000 255 255 255 115 0 1.000000
+          touch_addbutton "key_w" "vgui/touch/k_w" "+forward" 0.170000 0.450000 0.290000 0.450000 255 255 255 115 0 1.000000
+          touch_addbutton "key_a" "vgui/touch/k_a" "+moveleft" 0.050000 0.670000 0.170000 0.670000 255 255 255 115 0 1.000000
+          touch_addbutton "key_d" "vgui/touch/k_d" "+moveright" 0.290000 0.670000 0.410000 0.670000 255 255 255 115 0 1.000000
+          CFG2_EOF
+          cat > app/src/main/assets/extras/cfg/touch_default_cstrike_bhop.cfg <<'CFG3_EOF'
+          // SourceDroid touch layout: cstrike bhop
+          touch_removeall
+          touch_addbutton "look" "" "_look" 0 0 1 1
+          touch_addbutton "jump" "vgui/touch/jump" "+jump" 0.880000 0.213333 1.000000 0.213333 255 255 255 115 0 1.070000
+          touch_addbutton "bhop" "vgui/touch/bhop" "touch_bhop" 0.880000 0.462222 1.000000 0.462222 255 255 255 115 0 1.070000
+          touch_addbutton "attack" "vgui/touch/shoot" "+attack" 0.760000 0.583333 0.880000 0.583333 255 255 255 115 0 1.070000
+          touch_addbutton "attack2" "vgui/touch/shoot_alt" "+attack2" 0.760000 0.320000 0.880000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "duck" "vgui/touch/crouch" "+duck" 0.880000 0.746667 1.000000 0.746667 255 255 255 115 0 1.070000
+          touch_addbutton "zoom" "vgui/touch/zoom" "+zoom" 0.680000 0.000000 0.760000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "use" "vgui/touch/use" "+use" 0.760000 0.000000 0.840000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "reload" "vgui/touch/reload" "+reload" 0.000000 0.320000 0.120000 0.320000 255 255 255 115 0 1.070000
+          touch_addbutton "flashlight" "vgui/touch/flash_light_filled" "impulse 100" 0.920000 0.000000 1.000000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "invprev" "vgui/touch/prev_weap" "invprev" 0.000000 0.160000 0.070000 0.160000 255 255 255 115 0 1.070000
+          touch_addbutton "invnext" "vgui/touch/next_weap" "invnext" 0.000000 0.530000 0.070000 0.530000 255 255 255 115 0 1.070000
+          touch_addbutton "edit" "vgui/touch/settings" "touch_enableedit" 0.420000 0.000000 0.500000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "menu" "vgui/touch/menu" "gameui_activate" 0.000000 0.000000 0.080000 0.000000 255 255 255 115 0 1.070000
+          touch_addbutton "layout" "vgui/touch/lay_std" "touch_layout default" 0.620000 0.000000 0.680000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "tduck" "vgui/touch/tduck" "touch_tduck" 0.440000 0.700000 0.520000 0.700000 255 255 255 115 0 1.000000
+          touch_addbutton "bhopbot" "vgui/touch/bhopbot" "touch_bhopbot" 0.640000 0.140000 0.720000 0.140000 255 255 255 115 0 1.000000
+          touch_addbutton "boost" "vgui/touch/boost" "touch_boost" 0.540000 0.470000 0.620000 0.470000 255 255 255 115 0 1.000000
+          touch_addbutton "turn180" "vgui/touch/turn180" "touch_turn180" 0.640000 0.300000 0.720000 0.300000 255 255 255 115 0 1.000000
+          touch_addbutton "astrafe" "vgui/touch/astrafe" "touch_autostrafe" 0.640000 0.470000 0.720000 0.470000 255 255 255 115 0 1.000000
+          touch_addbutton "key_w" "vgui/touch/k_w" "+forward" 0.170000 0.450000 0.290000 0.450000 255 255 255 115 0 1.000000
+          touch_addbutton "key_a" "vgui/touch/k_a" "+moveleft" 0.050000 0.670000 0.170000 0.670000 255 255 255 115 0 1.000000
+          touch_addbutton "key_d" "vgui/touch/k_d" "+moveright" 0.290000 0.670000 0.410000 0.670000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_buy" "vgui/touch/cs_buy" "buy" 0.090000 0.000000 0.150000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_autobuy" "vgui/touch/cs_autobuy" "autobuy" 0.150000 0.000000 0.210000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio1" "vgui/touch/cs_radio1" "radio1" 0.210000 0.000000 0.270000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio2" "vgui/touch/cs_radio2" "radio2" 0.270000 0.000000 0.330000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_radio3" "vgui/touch/cs_radio3" "radio3" 0.330000 0.000000 0.390000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_score" "vgui/touch/cs_score" "+showscores" 0.500000 0.000000 0.560000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "cs_drop" "vgui/touch/cs_drop" "drop" 0.560000 0.000000 0.620000 0.000000 255 255 255 115 0 1.000000
+          touch_addbutton "n1" "vgui/touch/n1" "menuselect 1" 0.300000 0.915000 0.348000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n2" "vgui/touch/n2" "menuselect 2" 0.350000 0.915000 0.398000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n3" "vgui/touch/n3" "menuselect 3" 0.400000 0.915000 0.448000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n4" "vgui/touch/n4" "menuselect 4" 0.450000 0.915000 0.498000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n5" "vgui/touch/n5" "menuselect 5" 0.500000 0.915000 0.548000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n6" "vgui/touch/n6" "menuselect 6" 0.550000 0.915000 0.598000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n7" "vgui/touch/n7" "menuselect 7" 0.600000 0.915000 0.648000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n8" "vgui/touch/n8" "menuselect 8" 0.650000 0.915000 0.698000 0.915000 255 255 255 100 0 1.000000
+          touch_addbutton "n9" "vgui/touch/n9" "menuselect 9" 0.700000 0.915000 0.748000 0.915000 255 255 255 100 0 1.000000
+          CFG3_EOF
+          # engine activity runs in its own process (killed on exit -> no "shader api twice" on relaunch)
+          sed -i 's|android:name="com.valvesoftware.ValveActivity2"|android:name="com.valvesoftware.ValveActivity2"\n            android:process=":engine"|' app/src/main/AndroidManifest.xml
+          grep -n 'android:process' app/src/main/AndroidManifest.xml
+          # workshop: text search is query_type 12; ask for full details
+          sed -i 's|else 9 /\* text search \*/|else 12 /* text search */|' app/src/main/java/app/sourcedroid/workshop/WorkshopApi.kt
+          sed -i 's|&filetype=0"|\&filetype=0\&return_details=true"|' app/src/main/java/app/sourcedroid/workshop/WorkshopApi.kt
+          grep -n 'query_type\|return_details' app/src/main/java/app/sourcedroid/workshop/WorkshopApi.kt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Cache engine build
+        if: ${{ inputs.with_engine }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            project/engine
+            project/.ndk
+          key: engine-cache-v2
+      - name: Patch engine to log the call stack of the memory error
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
+          python3 - <<'PY'
+          # 1) crash handler: also write the report to <game folder>/sourcedroid_crash.log
+          p = "engine/launcher/android/crashhandler.cpp"
+          s = open(p).read()
+          if "SdFileLog" not in s:
+              old = '#define Log(msg) __android_log_print(ANDROID_LOG_DEBUG, "SRCENG", "%s", msg); DebugLogger()->Write(msg);'
+              if old not in s:
+                  print('crashhandler define not found, skipping')
+              new = '''static void SdFileLog( const char *m )
+          {
+              const char *r = getenv( "VALVE_GAME_PATH" );
+              char path[1024];
+              snprintf( path, sizeof( path ), "%s/sourcedroid_crash.log", r ? r : "/sdcard" );
+              FILE *f = fopen( path, "a" );
+              if ( f ) { fputs( m, f ); fclose( f ); }
+              f = fopen( "/storage/emulated/0/Download/sourcedroid_crash.log", "a" );
+              if ( f ) { fputs( m, f ); fclose( f ); }
+          }
+          #define Log(msg) __android_log_print(ANDROID_LOG_DEBUG, "SRCENG", "%s", msg); DebugLogger()->Write(msg); SdFileLog(msg);'''
+              s = s.replace(old, new, 1)
+              open(p, "w").write(s)
+          # 2) memory error: write size + call stack straight to <game folder>/oom_trace.txt (open/write/fsync per frame)
+          import subprocess
+          subprocess.call(["git", "-C", "engine", "checkout", "--", "tier0/mem.cpp"])
+          p = "engine/tier0/mem.cpp"
+          s = open(p).read()
+          helper = r"""
+          #ifdef ANDROID
+          #include <dlfcn.h>
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <fcntl.h>
+          #include <unistd.h>
+          #include <pthread.h>
+          static int g_oomFd = -1;
+          static char g_oomMaps[400000];
+          static void OomWrite( const char *s )
+          {
+              if ( g_oomFd >= 0 ) { write( g_oomFd, s, strlen( s ) ); fsync( g_oomFd ); }
+          }
+          // No unwinder (it crashes here): scan the stack for return addresses into executable library mappings.
+          static void __attribute__((noinline)) OomPrintBt( size_t nSize )
+          {
+              const char *root = getenv( "VALVE_GAME_PATH" );
+              const char *app = getenv( "APP_DATA_PATH" );
+              char paths[4][600];
+              snprintf( paths[0], 600, "%s/oom_trace.txt", root ? root : "/sdcard" );
+              snprintf( paths[1], 600, "/storage/emulated/0/oom_trace.txt" );
+              snprintf( paths[2], 600, "/storage/emulated/0/Download/oom_trace.txt" );
+              snprintf( paths[3], 600, "%s/files/oom_trace.txt", app ? app : "/data/local/tmp" );
+              int mfd = open( "/proc/self/maps", O_RDONLY );
+              int mlen = 0;
+              if ( mfd >= 0 )
+              {
+                  int r;
+                  while ( mlen < (int)sizeof( g_oomMaps ) - 1 && ( r = read( mfd, g_oomMaps + mlen, sizeof( g_oomMaps ) - 1 - mlen ) ) > 0 ) mlen += r;
+                  close( mfd );
+              }
+              g_oomMaps[mlen] = 0;
+              volatile uintptr_t marker = 0;
+              uintptr_t *sp = (uintptr_t*)&marker;
+              int maxWords = 12000;
+              {
+                  pthread_attr_t at; void *sa = 0; size_t ss = 0;
+                  if ( pthread_getattr_np( pthread_self(), &at ) == 0 )
+                  {
+                      pthread_attr_getstack( &at, &sa, &ss );
+                      pthread_attr_destroy( &at );
+                      long left = (long)( ( (uintptr_t)sa + ss - (uintptr_t)sp ) / sizeof( uintptr_t ) );
+                      if ( left < maxWords ) maxWords = left > 0 ? (int)left : 0;
+                  }
+                  else maxWords = 2000;
+              }
+              for ( int k = 0; k < 4; k++ )
+              {
+                  g_oomFd = open( paths[k], O_WRONLY | O_CREAT | O_TRUNC, 0666 );
+                  if ( g_oomFd < 0 ) continue;
+                  char line[900];
+                  snprintf( line, sizeof line, "OOM: failed allocation of %u bytes (file %s)\n", (unsigned)nSize, paths[k] );
+                  OomWrite( line );
+                  int hits = 0;
+                  for ( int i = 0; i < maxWords && hits < 120; i++ )
+                  {
+                      uintptr_t v = sp[i];
+                      if ( v < 0x10000 ) continue;
+                      // find the mapping line containing v with 'x' permission
+                      const char *p = g_oomMaps;
+                      while ( p && *p )
+                      {
+                          unsigned long lo = 0, hi = 0;
+                          char perm[8] = {0};
+                          if ( sscanf( p, "%lx-%lx %7s", &lo, &hi, perm ) == 3 && v >= lo && v < hi )
+                          {
+                              if ( perm[2] == 'x' )
+                              {
+                                  const char *path = strchr( p, '/' );
+                                  const char *eol = strchr( p, '\n' );
+                                  if ( path && eol && path < eol && strstr( path, ".so" ) )
+                                  {
+                                      char lib[600]; int n = (int)( eol - path ); if ( n > 599 ) n = 599;
+                                      memcpy( lib, path, n ); lib[n] = 0;
+                                      Dl_info d;
+                                      unsigned long base = dladdr( (void*)v, &d ) ? (unsigned long)d.dli_fbase : lo;
+                                      snprintf( line, sizeof line, "0x%lX:\tstack[%d] (base=0x%lX, %s)\n", (unsigned long)v - base, i, base, lib );
+                                      OomWrite( line );
+                                      hits++;
+                                  }
+                              }
+                              break;
+                          }
+                          p = strchr( p, '\n' );
+                          if ( p ) p++;
+                      }
+                  }
+                  OomWrite( "OOM end of trace\n" );
+                  close( g_oomFd );
+                  g_oomFd = -1;
+              }
+          }
+          #endif
+          """
+          import textwrap
+          helper = textwrap.dedent(helper)
+          s = s.replace("static bool s_oomerror_called = false;\n", "static bool s_oomerror_called = false;\n" + helper, 1)
+          s = s.replace("\t\ts_oomerror_called = true;\n", "\t\ts_oomerror_called = true;\n#ifdef ANDROID\n\t\tOomPrintBt( nSize );\n#endif\n", 1)
+          assert "OomPrintBt( nSize )" in s
+          open(p, "w").write(s)
+          PY
+          grep -n "SdFileLog" engine/launcher/android/crashhandler.cpp | head -3
+          grep -n "OomPrintBt" engine/tier0/mem.cpp
+
+      - name: Patch materialsystem (stop endless thread-event loop in EndFrame)
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
+          git -C engine checkout -- materialsystem/cmaterialsystem.cpp
+          python3 - <<'PY'
+          p = "engine/materialsystem/cmaterialsystem.cpp"
+          s = open(p).read()
+          T = "\t"
+          old = (T*2 + "for ( int i = 0; i < m_threadEvents.Count(); i++ )\n" +
+                 T*2 + "{\n" +
+                 T*3 + "g_pShaderDevice->HandleThreadEvent(m_threadEvents[i]);\n" +
+                 T*2 + "}\n" +
+                 T*2 + "m_threadEvents.RemoveAll();\n")
+          new = (T*2 + "if ( m_threadEvents.Count() )\n" +
+                 T*2 + "{\n" +
+                 T*3 + "// Single-threaded: this thread must own the device, otherwise the handlers re-post the event forever.\n" +
+                 T*3 + "g_pShaderAPI->AcquireThreadOwnership();\n" +
+                 T*3 + "// Handle only events queued so far; ones re-posted meanwhile wait for the next frame.\n" +
+                 T*3 + "int nEvents = m_threadEvents.Count();\n" +
+                 T*3 + "for ( int i = 0; i < nEvents; i++ )\n" +
+                 T*3 + "{\n" +
+                 T*4 + "g_pShaderDevice->HandleThreadEvent( m_threadEvents[i] );\n" +
+                 T*3 + "}\n" +
+                 T*3 + "m_threadEvents.RemoveMultiple( 0, nEvents );\n" +
+                 T*3 + "if ( m_threadEvents.Count() > 64 )\n" +
+                 T*4 + "m_threadEvents.RemoveAll();\n" +
+                 T*2 + "}\n")
+          assert s.count(old) == 1
+          open(p, "w").write(s.replace(old, new, 1))
+          PY
+          grep -n "Handle only events" engine/materialsystem/cmaterialsystem.cpp
+
+      - name: Patch touch controls (per-game layouts, bhop, layout switch)
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
+          tr -d ' \t\r\n' <<'B64_EOF' | base64 -d > /tmp/patch_touch.py
+          aW1wb3J0IHN1YnByb2Nlc3MKc3VicHJvY2Vzcy5jYWxsKFsiZ2l0IiwgIi1DIiwgImVuZ2luZSIs
+          ICJjaGVja291dCIsICItLSIsICJnYW1lL2NsaWVudC90b3VjaC5jcHAiLCAiZ2FtZS9jbGllbnQv
+          aW5fbWFpbi5jcHAiXSkKClQgPSAiXHQiCgojIC0tLS0tLS0tLS0tLS0tLS0gdG91Y2guY3BwIC0t
+          LS0tLS0tLS0tLS0tLS0KcCA9ICJlbmdpbmUvZ2FtZS9jbGllbnQvdG91Y2guY3BwIgpzID0gb3Bl
+          bihwKS5yZWFkKCkKCiMgMSkgZGVmYXVsdCBsYXlvdXQgZmlsZTogdG91Y2hfZGVmYXVsdF88Z2Ft
+          ZT48c3VmZml4Pi5jZmcgLT4gdG91Y2hfZGVmYXVsdDxzdWZmaXg+LmNmZyAtPiB0b3VjaF9kZWZh
+          dWx0XzxnYW1lPi5jZmcgLT4gdG91Y2hfZGVmYXVsdC5jZmcKbzEgPSBUICsgJ1Ffc25wcmludGYo
+          YnVmLCBzaXplb2YgYnVmLCAiY2ZnLyVzIiwgVE9VQ0hfREVGQVVMVF9DRkcpO1xuJwpvMiA9IFQq
+          MiArICdRX3NucHJpbnRmKGJ1Ziwgc2l6ZW9mIGJ1ZiwgImV4ZWMgJXMiLCBUT1VDSF9ERUZBVUxU
+          X0NGRyk7XG4nCmFzc2VydCBzLmNvdW50KG8xKSA9PSAxIGFuZCBzLmNvdW50KG8yKSA9PSAxCm4x
+          ID0gIlxuIi5qb2luKFsKICAgIFQgKyAnY2hhciBkZWZjZmdbOTZdOycsCiAgICBUICsgJ3snLAog
+          ICAgVCoyICsgJ2NoYXIgZ2RbNjRdLCBzZnhbNDhdLCBjYW5kWzNdWzk2XTsnLAogICAgVCoyICsg
+          J1Ffc3RybmNweSggZ2QsIFZfVW5xdWFsaWZpZWRGaWxlTmFtZSggZW5naW5lLT5HZXRHYW1lRGly
+          ZWN0b3J5KCkgKSwgc2l6ZW9mIGdkICk7JywKICAgIFQqMiArICdRX3N0cmxvd2VyKCBnZCApOycs
+          CiAgICBUKjIgKyAnc2Z4WzBdID0gMDsnLAogICAgVCoyICsgJ2lmKCAhUV9zdHJuaWNtcCggdG91
+          Y2hfY29uZmlnX2ZpbGUuR2V0U3RyaW5nKCksICJ0b3VjaF8iLCA2ICkgKScsCiAgICBUKjIgKyAn
+          eycsCiAgICBUKjMgKyAnUV9zdHJuY3B5KCBzZngsIHRvdWNoX2NvbmZpZ19maWxlLkdldFN0cmlu
+          ZygpICsgNSwgc2l6ZW9mIHNmeCApOycsCiAgICBUKjMgKyAnY2hhciAqZG90ID0gUV9zdHJyY2hy
+          KCBzZngsIFwnLlwnICk7JywKICAgIFQqMyArICdpZiggZG90ICkgKmRvdCA9IDA7JywKICAgIFQq
+          MyArICdRX3N0cmxvd2VyKCBzZnggKTsnLAogICAgVCoyICsgJ30nLAogICAgVCoyICsgJ1Ffc25w
+          cmludGYoIGNhbmRbMF0sIHNpemVvZiBjYW5kWzBdLCAidG91Y2hfZGVmYXVsdF8lcyVzLmNmZyIs
+          IGdkLCBzZnggKTsnLAogICAgVCoyICsgJ1Ffc25wcmludGYoIGNhbmRbMV0sIHNpemVvZiBjYW5k
+          WzFdLCAidG91Y2hfZGVmYXVsdCVzLmNmZyIsIHNmeCApOycsCiAgICBUKjIgKyAnUV9zbnByaW50
+          ZiggY2FuZFsyXSwgc2l6ZW9mIGNhbmRbMl0sICJ0b3VjaF9kZWZhdWx0XyVzLmNmZyIsIGdkICk7
+          JywKICAgIFQqMiArICdRX3N0cm5jcHkoIGRlZmNmZywgVE9VQ0hfREVGQVVMVF9DRkcsIHNpemVv
+          ZiBkZWZjZmcgKTsnLAogICAgVCoyICsgJ2ZvciggaW50IGkgPSAwOyBpIDwgMzsgaSsrICknLAog
+          ICAgVCoyICsgJ3snLAogICAgVCozICsgJ1Ffc25wcmludGYoIGJ1Ziwgc2l6ZW9mIGJ1ZiwgImNm
+          Zy8lcyIsIGNhbmRbaV0gKTsnLAogICAgVCozICsgJ2lmKCBmaWxlc3lzdGVtLT5GaWxlRXhpc3Rz
+          KCBidWYgKSApIHsgUV9zdHJuY3B5KCBkZWZjZmcsIGNhbmRbaV0sIHNpemVvZiBkZWZjZmcgKTsg
+          YnJlYWs7IH0nLAogICAgVCoyICsgJ30nLAogICAgVCArICd9JywKICAgIFQgKyAnUV9zbnByaW50
+          ZihidWYsIHNpemVvZiBidWYsICJjZmcvJXMiLCBkZWZjZmcpOycsCl0pICsgIlxuIgpuMiA9IFQq
+          MiArICdRX3NucHJpbnRmKGJ1Ziwgc2l6ZW9mIGJ1ZiwgImV4ZWMgJXMiLCBkZWZjZmcpO1xuJwpz
+          ID0gcy5yZXBsYWNlKG8xLCBuMSwgMSkucmVwbGFjZShvMiwgbjIsIDEpCgojIDIpIG1vcmUgdHJh
+          bnNwYXJlbnQgZGVmYXVsdCBidXR0b25zCmFzc2VydCBzLmNvdW50KCdyZ2JhX3QgY29sb3IoMjU1
+          LCAyNTUsIDI1NSwgMTU1KTsnKSA9PSAyCnMgPSBzLnJlcGxhY2UoJ3JnYmFfdCBjb2xvcigyNTUs
+          IDI1NSwgMjU1LCAxNTUpOycsICdyZ2JhX3QgY29sb3IoMjU1LCAyNTUsIDI1NSwgMTE1KTsnKQoK
+          IyAzKSBsYXlvdXQgc3dpdGNoaW5nICsgYmhvcCB0b2dnbGUsIHBsYWNlZCBiZWZvcmUgUmVzZXRU
+          b0RlZmF1bHRzCmFuY2hvciA9ICd2b2lkIENUb3VjaENvbnRyb2xzOjpSZXNldFRvRGVmYXVsdHMo
+          KVxuJwphc3NlcnQgcy5jb3VudChhbmNob3IpID09IDEKaGVscGVyID0gIlxuIi5qb2luKFsKICAg
+          ICdib29sIGdfYlRvdWNoQmhvcCA9IGZhbHNlOycsCiAgICAnYm9vbCBnX2JUb3VjaEF1dG9TdHJh
+          ZmUgPSBmYWxzZTsnLAogICAgJ2Jvb2wgZ19iVG91Y2hCaG9wQm90ID0gZmFsc2U7JywKICAgICdi
+          b29sIGdfYlRvdWNoQm9vc3QgPSBmYWxzZTsnLAogICAgJ3N0YXRpYyBib29sIHNfYkR1Y2tMYXRj
+          aCA9IGZhbHNlOycsCiAgICAnc3RhdGljIGZsb2F0IHNfZmxCaG9wT2xkQWlyID0gMC5mLCBzX2Zs
+          QmhvcE9sZEVuYWJsZSA9IDAuZjsnLAogICAgJ3N0YXRpYyBib29sIHNfYkJob3BDdmFycyA9IGZh
+          bHNlOycsCiAgICAnc3RhdGljIHZvaWQgU2RCaG9wQ3ZhcnMoIGJvb2wgYk9uICknLAogICAgJ3sn
+          LAogICAgVCArICdpZiggYk9uID09IHNfYkJob3BDdmFycyApJywKICAgIFQqMiArICdyZXR1cm47
+          JywKICAgIFQgKyAnc19iQmhvcEN2YXJzID0gYk9uOycsCiAgICBUICsgJ0NvblZhclJlZiBhaXIo
+          ICJzdl9haXJhY2NlbGVyYXRlIiApLCBlbiggInN2X2VuYWJsZWJ1bm55aG9wcGluZyIgKTsnLAog
+          ICAgVCArICdpZiggYk9uICknLAogICAgVCArICd7JywKICAgIFQqMiArICdpZiggYWlyLklzVmFs
+          aWQoKSApIHsgc19mbEJob3BPbGRBaXIgPSBhaXIuR2V0RmxvYXQoKTsgaWYoIHNfZmxCaG9wT2xk
+          QWlyIDwgMTAwLmYgKSBhaXIuU2V0VmFsdWUoIDEwMC5mICk7IH0nLAogICAgVCoyICsgJ2lmKCBl
+          bi5Jc1ZhbGlkKCkgKSB7IHNfZmxCaG9wT2xkRW5hYmxlID0gZW4uR2V0RmxvYXQoKTsgZW4uU2V0
+          VmFsdWUoIDEgKTsgfScsCiAgICBUICsgJ30nLAogICAgVCArICdlbHNlJywKICAgIFQgKyAneycs
+          CiAgICBUKjIgKyAnaWYoIGFpci5Jc1ZhbGlkKCkgKSBhaXIuU2V0VmFsdWUoIHNfZmxCaG9wT2xk
+          QWlyICk7JywKICAgIFQqMiArICdpZiggZW4uSXNWYWxpZCgpICkgZW4uU2V0VmFsdWUoIHNfZmxC
+          aG9wT2xkRW5hYmxlICk7JywKICAgIFQgKyAnfScsCiAgICAnfScsCiAgICAnQ09OX0NPTU1BTkQo
+          IHRvdWNoX2Job3AsICJ0b2dnbGUgYXV0b21hdGljIGJ1bm55IGhvcHBpbmcgKGp1bXAgc3BhbSki
+          ICknLAogICAgJ3snLAogICAgVCArICdnX2JUb3VjaEJob3AgPSAhZ19iVG91Y2hCaG9wOycsCiAg
+          ICBUICsgJ2lmKCAhZ19iVG91Y2hCaG9wICkgZ19iVG91Y2hCaG9wQm90ID0gZmFsc2U7JywKICAg
+          IFQgKyAnU2RCaG9wQ3ZhcnMoIGdfYlRvdWNoQmhvcCB8fCBnX2JUb3VjaEJvb3N0ICk7JywKICAg
+          IFQgKyAnTXNnKCAidG91Y2hfYmhvcCAlZFxcbiIsIGdfYlRvdWNoQmhvcCA/IDEgOiAwICk7JywK
+          ICAgICd9JywKICAgICcnLAogICAgJ0NPTl9DT01NQU5EKCB0b3VjaF9iaG9wYm90LCAidG9nZ2xl
+          IGZ1bGwgYXV0byBidW5ueSBob3A6IGp1bXAgc3BhbSArIHNtb290aCBjYW1lcmEgc3dlZXAgKyBB
+          L0QiICknLAogICAgJ3snLAogICAgVCArICdnX2JUb3VjaEJob3BCb3QgPSAhZ19iVG91Y2hCaG9w
+          Qm90OycsCiAgICBUICsgJ2dfYlRvdWNoQmhvcCA9IGdfYlRvdWNoQmhvcEJvdDsnLAogICAgVCAr
+          ICdTZEJob3BDdmFycyggZ19iVG91Y2hCaG9wQm90IHx8IGdfYlRvdWNoQm9vc3QgKTsnLAogICAg
+          VCArICdNc2coICJ0b3VjaF9iaG9wYm90ICVkXFxuIiwgZ19iVG91Y2hCaG9wQm90ID8gMSA6IDAg
+          KTsnLAogICAgJ30nLAogICAgJycsCiAgICAnQ09OX0NPTU1BTkQoIHRvdWNoX2Jvb3N0LCAidG9n
+          Z2xlIGF1dG8gYm9vc3Q6IHNwcmludCBiYWNrd2FyZHMsIGNyb3VjaCwgdGhlbiBqdW1wIHNwYW0g
+          dW50aWwgdG9nZ2xlZCBvZmYiICknLAogICAgJ3snLAogICAgVCArICdnX2JUb3VjaEJvb3N0ID0g
+          IWdfYlRvdWNoQm9vc3Q7JywKICAgIFQgKyAnU2RCaG9wQ3ZhcnMoIGdfYlRvdWNoQm9vc3QgfHwg
+          Z19iVG91Y2hCaG9wIHx8IGdfYlRvdWNoQmhvcEJvdCApOycsCiAgICBUICsgJ01zZyggInRvdWNo
+          X2Jvb3N0ICVkXFxuIiwgZ19iVG91Y2hCb29zdCA/IDEgOiAwICk7JywKICAgICd9JywKICAgICcn
+          LAogICAgJ0NPTl9DT01NQU5EKCB0b3VjaF9hdXRvc3RyYWZlLCAidG9nZ2xlIGF1dG9tYXRpYyBB
+          L0Qgc3RyYWZpbmcgaW4gdGhlIGFpciIgKScsCiAgICAneycsCiAgICBUICsgJ2dfYlRvdWNoQXV0
+          b1N0cmFmZSA9ICFnX2JUb3VjaEF1dG9TdHJhZmU7JywKICAgIFQgKyAnTXNnKCAidG91Y2hfYXV0
+          b3N0cmFmZSAlZFxcbiIsIGdfYlRvdWNoQXV0b1N0cmFmZSA/IDEgOiAwICk7JywKICAgICd9JywK
+          ICAgICcnLAogICAgJ0NPTl9DT01NQU5EKCB0b3VjaF90dXJuMTgwLCAidHVybiBhcm91bmQgYnkg
+          MTgwIGRlZ3JlZXMiICknLAogICAgJ3snLAogICAgVCArICdRQW5nbGUgdmE7JywKICAgIFQgKyAn
+          ZW5naW5lLT5HZXRWaWV3QW5nbGVzKCB2YSApOycsCiAgICBUICsgJ3ZhLnkgPSBBbmdsZU5vcm1h
+          bGl6ZSggdmEueSArIDE4MC5mICk7JywKICAgIFQgKyAnZW5naW5lLT5TZXRWaWV3QW5nbGVzKCB2
+          YSApOycsCiAgICAnfScsCiAgICAnJywKICAgICdDT05fQ09NTUFORCggdG91Y2hfdGR1Y2ssICJs
+          YXRjaCBjcm91Y2ggb24vb2ZmIiApJywKICAgICd7JywKICAgIFQgKyAnc19iRHVja0xhdGNoID0g
+          IXNfYkR1Y2tMYXRjaDsnLAogICAgVCArICdlbmdpbmUtPkNsaWVudENtZF9VbnJlc3RyaWN0ZWQo
+          IHNfYkR1Y2tMYXRjaCA/ICIrZHVjayIgOiAiLWR1Y2siICk7JywKICAgICd9JywKICAgICcnLAog
+          ICAgJ3N0YXRpYyB2b2lkIFNkUmVzZXRBc3Npc3QoKScsCiAgICAneycsCiAgICBUICsgJ2dfYlRv
+          dWNoQmhvcCA9IGZhbHNlOycsCiAgICBUICsgJ2dfYlRvdWNoQXV0b1N0cmFmZSA9IGZhbHNlOycs
+          CiAgICBUICsgJ2dfYlRvdWNoQmhvcEJvdCA9IGZhbHNlOycsCiAgICBUICsgJ2dfYlRvdWNoQm9v
+          c3QgPSBmYWxzZTsnLAogICAgVCArICdTZEJob3BDdmFycyggZmFsc2UgKTsnLAogICAgVCArICdp
+          Ziggc19iRHVja0xhdGNoICkgeyBzX2JEdWNrTGF0Y2ggPSBmYWxzZTsgZW5naW5lLT5DbGllbnRD
+          bWRfVW5yZXN0cmljdGVkKCAiLWR1Y2siICk7IH0nLAogICAgJ30nLAogICAgJycsCiAgICAnc3Rh
+          dGljIGNoYXIgc19zelNkTGF5b3V0WzY0XSA9ICIiOycsCiAgICAnc3RhdGljIHZvaWQgU2RTeW5j
+          TGF5b3V0KCknLAogICAgJ3snLAogICAgVCArICdjb25zdCBjaGFyICpjdXIgPSB0b3VjaF9jb25m
+          aWdfZmlsZS5HZXRTdHJpbmcoKTsnLAogICAgVCArICdpZiggIVFfc3RyaWNtcCggc19zelNkTGF5
+          b3V0LCBjdXIgKSApJywKICAgIFQqMiArICdyZXR1cm47JywKICAgIFQgKyAnYm9vbCBiQ2hhbmdl
+          ZCA9IHNfc3pTZExheW91dFswXSAhPSAwOycsCiAgICBUICsgJ1Ffc3RybmNweSggc19zelNkTGF5
+          b3V0LCBjdXIsIHNpemVvZiBzX3N6U2RMYXlvdXQgKTsnLAogICAgVCArICdpZiggIWJDaGFuZ2Vk
+          ICknLAogICAgVCoyICsgJ3JldHVybjsnLAogICAgVCArICdjaGFyIGJ1ZlsyNTZdOycsCiAgICBU
+          ICsgJ1Ffc25wcmludGYoIGJ1Ziwgc2l6ZW9mIGJ1ZiwgImNmZy8lcyIsIGN1ciApOycsCiAgICBU
+          ICsgJ2lmKCBmaWxlc3lzdGVtLT5GaWxlRXhpc3RzKCBidWYsICJNT0QiICkgKScsCiAgICBUICsg
+          J3snLAogICAgVCoyICsgJ1Ffc25wcmludGYoIGJ1Ziwgc2l6ZW9mIGJ1ZiwgImV4ZWMgJXNcXG4i
+          LCBjdXIgKTsnLAogICAgVCoyICsgJ2VuZ2luZS0+RXhlY3V0ZUNsaWVudENtZCggYnVmICk7JywK
+          ICAgIFQgKyAnfScsCiAgICBUICsgJ2Vsc2UnLAogICAgVCoyICsgJ2dUb3VjaC5SZXNldFRvRGVm
+          YXVsdHMoKTsnLAogICAgJ30nLAogICAgJycsCiAgICAnQ09OX0NPTU1BTkQoIHRvdWNoX2xheW91
+          dCwgInRvdWNoX2xheW91dCA8ZGVmYXVsdHxiaG9wfG5hbWU+OiBzd2l0Y2ggdG91Y2ggYnV0dG9u
+          IGxheW91dCIgKScsCiAgICAneycsCiAgICBUICsgJ2lmKCBhcmdzLkFyZ0MoKSA8IDIgKScsCiAg
+          ICBUICsgJ3snLAogICAgVCoyICsgJ01zZyggIlVzYWdlOiB0b3VjaF9sYXlvdXQgPGRlZmF1bHR8
+          YmhvcHxuYW1lPlxcbiIgKTsnLAogICAgVCoyICsgJ3JldHVybjsnLAogICAgVCArICd9JywKICAg
+          IFQgKyAnY2hhciBmaWxlWzY0XTsnLAogICAgVCArICdpZiggIVFfc3RyaWNtcCggYXJnc1sxXSwg
+          ImRlZmF1bHQiICkgKScsCiAgICBUKjIgKyAnUV9zdHJuY3B5KCBmaWxlLCAidG91Y2guY2ZnIiwg
+          c2l6ZW9mIGZpbGUgKTsnLAogICAgVCArICdlbHNlJywKICAgIFQqMiArICdRX3NucHJpbnRmKCBm
+          aWxlLCBzaXplb2YgZmlsZSwgInRvdWNoXyVzLmNmZyIsIGFyZ3NbMV0gKTsnLAogICAgVCArICd0
+          b3VjaF9jb25maWdfZmlsZS5TZXRWYWx1ZSggZmlsZSApOycsCiAgICBUICsgJ1NkU3luY0xheW91
+          dCgpOycsCiAgICAnfScsCiAgICAnJywKXSkgKyAiXG4iCnMgPSBzLnJlcGxhY2UoYW5jaG9yLCBo
+          ZWxwZXIgKyBhbmNob3IsIDEpCgojIDQpIHJlbWVtYmVyIHRoZSBsYXlvdXQgbG9hZGVkIGluIElu
+          aXQsIHJlLXN5bmMgb24gZXZlcnkgbGV2ZWwgc3RhcnQgKGNvbmZpZy5jZmcgaXMgcmVhZCBhZnRl
+          ciBJbml0KQpvMyA9IFQgKyAnQ3JlYXRlQXRsYXNUZXh0dXJlKCk7XG4nICsgVCArICdtX2ZsSGlk
+          ZVRvdWNoID0gMC5mO1xuJwphc3NlcnQgcy5jb3VudChvMykgPT0gMQpzID0gcy5yZXBsYWNlKG8z
+          LCBUICsgJ1Ffc3RybmNweSggc19zelNkTGF5b3V0LCB0b3VjaF9jb25maWdfZmlsZS5HZXRTdHJp
+          bmcoKSwgc2l6ZW9mIHNfc3pTZExheW91dCApO1xuJyArIG8zLCAxKQpvNCA9ICd2b2lkIENUb3Vj
+          aENvbnRyb2xzOjpMZXZlbEluaXQoKVxue1xuJwphc3NlcnQgcy5jb3VudChvNCkgPT0gMQpzID0g
+          cy5yZXBsYWNlKG80LCBvNCArIFQgKyAnU2RSZXNldEFzc2lzdCgpO1xuJyArIFQgKyAnU2RTeW5j
+          TGF5b3V0KCk7XG4nLCAxKQpvcGVuKHAsICJ3Iikud3JpdGUocykKCiMgLS0tLS0tLS0tLS0tLS0t
+          LSBpbl9tYWluLmNwcDogYXV0by1qdW1wIC0tLS0tLS0tLS0tLS0tLS0KcCA9ICJlbmdpbmUvZ2Ft
+          ZS9jbGllbnQvaW5fbWFpbi5jcHAiCnMgPSBvcGVuKHApLnJlYWQoKQpvNSA9IFQgKyAnY21kLT5i
+          dXR0b25zID0gR2V0QnV0dG9uQml0cyggMSApO1xuI2VuZGlmXG4nCmFzc2VydCBzLmNvdW50KG81
+          KSA9PSAxCmFkZCA9ICJcbiIuam9pbihbCiAgICBUICsgJ2V4dGVybiBib29sIGdfYlRvdWNoQmhv
+          cCwgZ19iVG91Y2hBdXRvU3RyYWZlLCBnX2JUb3VjaEJob3BCb3QsIGdfYlRvdWNoQm9vc3Q7JywK
+          ICAgIFQgKyAnaWYoIGdfYlRvdWNoQmhvcCB8fCBnX2JUb3VjaEF1dG9TdHJhZmUgfHwgZ19iVG91
+          Y2hCaG9wQm90IHx8IGdfYlRvdWNoQm9vc3QgKScsCiAgICBUICsgJ3snLAogICAgVCoyICsgJ3N0
+          YXRpYyBmbG9hdCBzX2ZsUHJldllhdyA9IDAuZiwgc19mbEhvbGRVbnRpbCA9IDAuZiwgc19mbEtl
+          eXNVbnRpbCA9IDAuZiwgc19mbERpciA9IDEuZiwgc19mbEJvb3N0VCA9IDAuZjsnLAogICAgVCoy
+          ICsgJ3N0YXRpYyBib29sIHNfYlN0ZWVyID0gZmFsc2U7JywKICAgIFQqMiArICdzdGF0aWMgaW50
+          IHNfaUZsaXAgPSAwOycsCiAgICBUKjIgKyAnc3RhdGljIGJvb2wgc19iUHJldkp1bXAgPSBmYWxz
+          ZSwgc19iV2FzQWlyID0gZmFsc2U7JywKICAgIFQqMiArICdzdGF0aWMgaW50IHNfaUJvb3N0ID0g
+          MDsnLAogICAgVCoyICsgJ0NfQmFzZVBsYXllciAqcFNkUGwgPSBDX0Jhc2VQbGF5ZXI6OkdldExv
+          Y2FsUGxheWVyKCk7JywKICAgIFQqMiArICdib29sIGJTZEdyb3VuZCA9IHBTZFBsICYmICggcFNk
+          UGwtPkdldEZsYWdzKCkgJiBGTF9PTkdST1VORCApOycsCiAgICBUKjIgKyAnYm9vbCBiU2RXYWxr
+          ID0gcFNkUGwgJiYgcFNkUGwtPklzQWxpdmUoKSAmJiBwU2RQbC0+R2V0TW92ZVR5cGUoKSA9PSBN
+          T1ZFVFlQRV9XQUxLICYmIHBTZFBsLT5HZXRXYXRlckxldmVsKCkgPCAyOycsCiAgICBUKjIgKyAn
+          ZmxvYXQgZmxOb3cgPSBncEdsb2JhbHMtPmN1cnRpbWU7JywKICAgIFQqMiArICdmbG9hdCBmbFBs
+          YXllcllhdyA9IEFuZ2xlTm9ybWFsaXplKCB2aWV3YW5nbGVzW1lBV10gLSBzX2ZsUHJldllhdyAp
+          OycsCiAgICBUKjIgKyAnYm9vbCBiUGxheWVyS2V5cyA9ICggY21kLT5idXR0b25zICYgKCBJTl9N
+          T1ZFTEVGVCB8IElOX01PVkVSSUdIVCB8IElOX0JBQ0sgKSApICE9IDA7JywKICAgIFQqMiArICdp
+          ZiggZmFic2YoIGZsUGxheWVyWWF3ICkgPiAwLjRmICkgeyBzX2ZsSG9sZFVudGlsID0gZmxOb3cg
+          KyAwLjRmOyBzX2JTdGVlciA9IHRydWU7IH0gICAvLyB0aGUgcGxheWVyIGxvb2tzIHNvbWV3aGVy
+          ZTogZm9sbG93IGhpcyB2aWV3JywKICAgIFQqMiArICdpZiggYlBsYXllcktleXMgKSBzX2ZsS2V5
+          c1VudGlsID0gZmxOb3cgKyAwLjRmOyAgIC8vIHRoZSBwbGF5ZXIgcHJlc3NlcyBtb3ZlbWVudCBr
+          ZXlzOiBoZSBkcml2ZXMnLAogICAgVCoyICsgJ2lmKCAhZ19iVG91Y2hCaG9wQm90ICkgc19iU3Rl
+          ZXIgPSBmYWxzZTsnLAogICAgVCoyICsgJ2Jvb2wgYkhvbGQgPSBmbE5vdyA8IHNfZmxLZXlzVW50
+          aWw7JywKICAgIFQqMiArICdib29sIGJUdXJuaW5nID0gZmxOb3cgPCBzX2ZsSG9sZFVudGlsOycs
+          CiAgICBUKjIgKyAnLy8gYXV0byBib29zdDogc3ByaW50IGJhY2t3YXJkcyAtPiBjcm91Y2ggLT4g
+          anVtcCBzcGFtIHVudGlsIHRvZ2dsZWQgb2ZmJywKICAgIFQqMiArICdib29sIGJCb29zdEp1bXAg
+          PSBmYWxzZTsnLAogICAgVCoyICsgJ2lmKCAhZ19iVG91Y2hCb29zdCApIHNfaUJvb3N0ID0gMDsn
+          LAogICAgVCoyICsgJ2Vsc2UgaWYoIGJTZFdhbGsgKScsCiAgICBUKjIgKyAneycsCiAgICBUKjMg
+          KyAnaWYoIHNfaUJvb3N0ID09IDAgKSB7IHNfaUJvb3N0ID0gMTsgc19mbEJvb3N0VCA9IGZsTm93
+          OyB9JywKICAgIFQqMyArICdpZiggc19pQm9vc3QgPT0gMSApJywKICAgIFQqMyArICd7JywKICAg
+          IFQqNCArICdjb25zdCBjaGFyICpzekdhbWUgPSBlbmdpbmUtPkdldEdhbWVEaXJlY3RvcnkoKTsn
+          LAogICAgVCo0ICsgJ2lmKCAhKCBzekdhbWUgJiYgUV9zdHJpc3RyKCBzekdhbWUsICJjc3RyaWtl
+          IiApICkgKSBjbWQtPmJ1dHRvbnMgfD0gSU5fU1BFRUQ7JywKICAgIFQqNCArICdjbWQtPmJ1dHRv
+          bnMgJj0gfiggSU5fRk9SV0FSRCB8IElOX01PVkVMRUZUIHwgSU5fTU9WRVJJR0hUICk7JywKICAg
+          IFQqNCArICdjbWQtPmJ1dHRvbnMgfD0gSU5fQkFDSzsnLAogICAgVCo0ICsgJ2NtZC0+Zm9yd2Fy
+          ZG1vdmUgPSAtNDUwLmY7IGNtZC0+c2lkZW1vdmUgPSAwLmY7JywKICAgIFQqNCArICdpZiggZmxO
+          b3cgLSBzX2ZsQm9vc3RUID4gMC45ZiApIHsgc19pQm9vc3QgPSAyOyBzX2ZsQm9vc3RUID0gZmxO
+          b3c7IH0nLAogICAgVCozICsgJ30nLAogICAgVCozICsgJ2Vsc2UgaWYoIHNfaUJvb3N0ID09IDIg
+          KScsCiAgICBUKjMgKyAneycsCiAgICBUKjQgKyAnY21kLT5idXR0b25zIHw9IElOX0RVQ0s7JywK
+          ICAgIFQqNCArICdpZiggZmxOb3cgLSBzX2ZsQm9vc3RUID4gMC4zNWYgKSBzX2lCb29zdCA9IDM7
+          JywKICAgIFQqMyArICd9JywKICAgIFQqMyArICdlbHNlJywKICAgIFQqNCArICdiQm9vc3RKdW1w
+          ID0gdHJ1ZTsnLAogICAgVCoyICsgJ30nLAogICAgVCoyICsgJy8vIGp1bXAgc3BhbTogcHJlc3Mg
+          b24gZXZlcnkgb3RoZXIgY29tbWFuZCwgdGhlIHNlcnZlciBqdW1wcyBvbiB0aGUgZmlyc3QgZ3Jv
+          dW5kIHRpY2snLAogICAgVCoyICsgJ2lmKCAoIGdfYlRvdWNoQmhvcCB8fCBiQm9vc3RKdW1wICkg
+          JiYgYlNkV2FsayApJywKICAgIFQqMiArICd7JywKICAgIFQqMyArICdzX2JQcmV2SnVtcCA9ICFz
+          X2JQcmV2SnVtcDsnLAogICAgVCozICsgJ2lmKCBzX2JQcmV2SnVtcCApIGNtZC0+YnV0dG9ucyB8
+          PSBJTl9KVU1QOyBlbHNlIGNtZC0+YnV0dG9ucyAmPSB+SU5fSlVNUDsnLAogICAgVCoyICsgJ30n
+          LAogICAgVCoyICsgJ2Vsc2UnLAogICAgVCozICsgJ3NfYlByZXZKdW1wID0gZmFsc2U7JywKICAg
+          IFQqMiArICdpZiggYlNkV2FsayAmJiBiU2RHcm91bmQgJiYgc19iV2FzQWlyICkgeyBzX2ZsRGly
+          ID0gLXNfZmxEaXI7IHNfYldhc0FpciA9IGZhbHNlOyB9JywKICAgIFQqMiArICdpZiggYlNkV2Fs
+          ayAmJiAhYlNkR3JvdW5kICkgc19iV2FzQWlyID0gdHJ1ZTsnLAogICAgVCoyICsgJy8vIGF1dG8g
+          c3RyYWZlOiBrZWVwIHRoZSB2aWV3IGF0IHRoZSBvcHRpbWFsIGFuZ2xlIHRvIHRoZSB2ZWxvY2l0
+          eSAoc3BlZWQgZGVwZW5kZW50KScsCiAgICBUKjIgKyAnYm9vbCBiU3RyYWZlID0gKCAoIGdfYlRv
+          dWNoQXV0b1N0cmFmZSAmJiBmYWJzZiggZmxQbGF5ZXJZYXcgKSA+IDAuMDJmICkgfHwgKCBnX2JU
+          b3VjaEJob3BCb3QgJiYgIWJIb2xkICkgKSAmJiBiU2RXYWxrICYmICFiU2RHcm91bmQ7JywKICAg
+          IFQqMiArICdpZiggYlN0cmFmZSApJywKICAgIFQqMiArICd7JywKICAgIFQqMyArICdWZWN0b3Ig
+          dlNkVmVsID0gcFNkUGwtPkdldEFic1ZlbG9jaXR5KCk7JywKICAgIFQqMyArICdmbG9hdCBmbFNw
+          ZCA9IHNxcnRmKCB2U2RWZWwueCAqIHZTZFZlbC54ICsgdlNkVmVsLnkgKiB2U2RWZWwueSApOycs
+          CiAgICBUKjMgKyAnaWYoIGZsU3BkID4gOTAuZiApJywKICAgIFQqMyArICd7JywKICAgIFQqNCAr
+          ICdmbG9hdCBmbFBzaSA9IFJBRDJERUcoIGF0YW4yZiggdlNkVmVsLnksIHZTZFZlbC54ICkgKTsn
+          LAogICAgVCo0ICsgJ2Zsb2F0IGZsRXJyID0gQW5nbGVOb3JtYWxpemUoIHZpZXdhbmdsZXNbWUFX
+          XSAtIGZsUHNpICk7ICAgLy8gd2hlcmUgdGhlIHBsYXllciBsb29rcyBtaW51cyB3aGVyZSB3ZSBt
+          b3ZlJywKICAgIFQqNCArICdpZiggc19iU3RlZXIgJiYgIWJUdXJuaW5nICYmIGZhYnNmKCBmbEVy
+          ciApIDwgOC5mICkgc19iU3RlZXIgPSBmYWxzZTsgICAvLyBoZWFkaW5nIHJlYWNoZWQ6IHRoZSBi
+          b3QgZ2V0cyB0aGUgY2FtZXJhIGJhY2snLAogICAgVCo0ICsgJ2Jvb2wgYkxlZnQ7JywKICAgIFQq
+          NCArICdpZiggIWdfYlRvdWNoQmhvcEJvdCApJywKICAgIFQqNSArICdiTGVmdCA9IGZsUGxheWVy
+          WWF3ID4gMC5mOycsCiAgICBUKjQgKyAnZWxzZSBpZiggc19iU3RlZXIgKScsCiAgICBUKjQgKyAn
+          eycsCiAgICBUKjUgKyAnLy8gdGhlIGNhbWVyYSBiZWxvbmdzIHRvIHRoZSBwbGF5ZXI6IHR1cm4g
+          dGhlIHZlbG9jaXR5IHRvd2FyZHMgaGlzIHZpZXcgd2l0aCBBL0QsIGFsdGVybmF0ZSB3aGVuIGFs
+          aWduZWQnLAogICAgVCo1ICsgJ2lmKCBmYWJzZiggZmxFcnIgKSA+IDMuZiApIGJMZWZ0ID0gZmxF
+          cnIgPiAwLmY7IGVsc2UgYkxlZnQgPSAoICggc19pRmxpcCsrICkgJiAxICkgIT0gMDsnLAogICAg
+          VCo0ICsgJ30nLAogICAgVCo0ICsgJ2Vsc2UnLAogICAgVCo0ICsgJ3snLAogICAgVCo1ICsgJ2Zs
+          b2F0IGZsUGhpID0gUkFEMkRFRyggYWNvc2YoIGNsYW1wKCAyMi5mIC8gZmxTcGQsIDAuZiwgMS5m
+          ICkgKSApOycsCiAgICBUKjUgKyAnZmxvYXQgZmxUYXJnZXQgPSBmbFBzaSAtIHNfZmxEaXIgKiAo
+          IDkwLmYgLSBmbFBoaSApOycsCiAgICBUKjUgKyAnZmxvYXQgZmxEaWZmID0gQW5nbGVOb3JtYWxp
+          emUoIGZsVGFyZ2V0IC0gdmlld2FuZ2xlc1tZQVddICk7JywKICAgIFQqNSArICdmbG9hdCBmbE1h
+          eCA9IDQ1MC5mICogaW5wdXRfc2FtcGxlX2ZyYW1ldGltZTsnLAogICAgVCo1ICsgJ3ZpZXdhbmds
+          ZXNbWUFXXSA9IEFuZ2xlTm9ybWFsaXplKCB2aWV3YW5nbGVzW1lBV10gKyBjbGFtcCggZmxEaWZm
+          LCAtZmxNYXgsIGZsTWF4ICkgKTsnLAogICAgVCo1ICsgJ2VuZ2luZS0+U2V0Vmlld0FuZ2xlcygg
+          dmlld2FuZ2xlcyApOycsCiAgICBUKjUgKyAnYkxlZnQgPSBzX2ZsRGlyID4gMC5mOycsCiAgICBU
+          KjQgKyAnfScsCiAgICBUKjQgKyAnQ29uVmFyUmVmIHNkU2lkZSggImNsX3NpZGVzcGVlZCIgKTsn
+          LAogICAgVCo0ICsgJ2Zsb2F0IGZsU3AgPSBzZFNpZGUuSXNWYWxpZCgpID8gc2RTaWRlLkdldEZs
+          b2F0KCkgOiA0NTAuZjsnLAogICAgVCo0ICsgJ2NtZC0+YnV0dG9ucyAmPSB+KCBJTl9GT1JXQVJE
+          IHwgSU5fQkFDSyB8IElOX01PVkVMRUZUIHwgSU5fTU9WRVJJR0hUICk7JywKICAgIFQqNCArICdj
+          bWQtPmZvcndhcmRtb3ZlID0gMC5mOycsCiAgICBUKjQgKyAnaWYoIGJMZWZ0ICkgeyBjbWQtPnNp
+          ZGVtb3ZlID0gLWZsU3A7IGNtZC0+YnV0dG9ucyB8PSBJTl9NT1ZFTEVGVDsgfScsCiAgICBUKjQg
+          KyAnZWxzZSB7IGNtZC0+c2lkZW1vdmUgPSBmbFNwOyBjbWQtPmJ1dHRvbnMgfD0gSU5fTU9WRVJJ
+          R0hUOyB9JywKICAgIFQqMyArICd9JywKICAgIFQqMiArICd9JywKICAgIFQqMiArICdzX2ZsUHJl
+          dllhdyA9IHZpZXdhbmdsZXNbWUFXXTsnLAogICAgVCArICd9JywKXSkgKyAiXG4iCnMgPSBzLnJl
+          cGxhY2UobzUsIG81ICsgYWRkLCAxKQpvcGVuKHAsICJ3Iikud3JpdGUocykK
+          B64_EOF
+          python3 /tmp/patch_touch.py
+                    grep -n "g_bTouchBhop\|SdSyncLayout" engine/game/client/touch.cpp engine/game/client/in_main.cpp | head
+
+      - name: Patch gamemovement (HL1-style bunny hop physics)
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          [ -d engine/.git ] || { git clone https://github.com/nillerusr/source-engine engine && git -C engine checkout ed8209cc35c61fbd8ddff8480962a01c981eef2f; }
+          base64 -d > /tmp/patch_gm.py <<'GM_EOF'
+          IyBITDEtc3R5bGUgbW92ZW1lbnQgZm9yIEhMMiAoZGVyaXZlZCBmcm9tIHRoZSBpbnZpbjF4IEhM
+          MS1tb3ZlbWVudCBtb2QncyBnYW1lbW92ZW1lbnQuY3BwIGNoYW5nZXMpCmltcG9ydCBzdWJwcm9j
+          ZXNzCnAgPSAiZW5naW5lL2dhbWUvc2hhcmVkL2dhbWVtb3ZlbWVudC5jcHAiCnN1YnByb2Nlc3Mu
+          Y2hlY2tfY2FsbChbImdpdCIsICItQyIsICJlbmdpbmUiLCAiY2hlY2tvdXQiLCAiLS0iLCAiZ2Ft
+          ZS9zaGFyZWQvZ2FtZW1vdmVtZW50LmNwcCJdKQpzID0gb3BlbihwKS5yZWFkKCkKVCA9ICJcdCIK
+          ZGVmIHJlcChvbGQsIG5ldyk6CiAgICBnbG9iYWwgcwogICAgYXNzZXJ0IHMuY291bnQob2xkKSA9
+          PSAxLCBvbGQKICAgIHMgPSBzLnJlcGxhY2Uob2xkLCBuZXcsIDEpCiMgMCkgb24vb2ZmIHN3aXRj
+          aCAoc2V0IGZyb20gdGhlIGFwcCBzZXR0aW5ncyB2aWEgK3NkX2hsMW1vdmUpCnJlcCgiYm9vbCBn
+          X2JNb3ZlbWVudE9wdGltaXphdGlvbnMgPSB0cnVlO1xuIiwKICAgICJib29sIGdfYk1vdmVtZW50
+          T3B0aW1pemF0aW9ucyA9IHRydWU7XG5zdGF0aWMgQ29uVmFyIHNkX2hsMW1vdmUoIFwic2RfaGwx
+          bW92ZVwiLCBcIjFcIiwgRkNWQVJfUkVQTElDQVRFRCwgXCJITDEtc3R5bGUgbW92ZW1lbnQgKGJ1
+          bm55IGhvcCBnYWlucyBzcGVlZCk6IDEgPSBvbiwgMCA9IG9yaWdpbmFsIEhMMiBtb3ZlbWVudFwi
+          ICk7XG4iKQojIDEpIGFpciBhY2NlbGVyYXRpb24gY2FwIGxpa2UgSEwxL29sZCBTREsKcmVwKFQg
+          KyAiLy8gQ2FwIGl0XG4iICsgVCArICJpZiAoYWNjZWxzcGVlZCA+IGFkZHNwZWVkKVxuIiArIFQq
+          MiArICJhY2NlbHNwZWVkID0gYWRkc3BlZWQ7XG4iICsgVCArICJcbiIgKyBUICsgIi8vIEFkanVz
+          dCBwbW92ZSB2ZWwuXG4iLAogICAgVCArICIvLyBDYXAgaXRcbiIgKyBUICsgImZsb2F0IHNkQ2Fw
+          ID0gc2RfaGwxbW92ZS5HZXRCb29sKCkgPyAoIGFkZHNwZWVkICogMi4wZiApIDogYWRkc3BlZWQ7
+          XG4iICsgVCArICJpZiAoYWNjZWxzcGVlZCA+IHNkQ2FwKVxuIiArIFQqMiArICJhY2NlbHNwZWVk
+          ID0gc2RDYXA7XG4iICsgVCArICJcbiIgKyBUICsgIi8vIEFkanVzdCBwbW92ZSB2ZWwuXG4iKQoj
+          IDIpIGFsbG93IGp1bXBpbmcgcmlnaHQgYWZ0ZXIgYSBjcm91Y2ggdHJhbnNpdGlvbgpyZXAoVCAr
+          ICJpZiAoIHBsYXllci0+bV9Mb2NhbC5tX2JEdWNraW5nICYmICggIHBsYXllci0+R2V0RmxhZ3Mo
+          KSAmIEZMX0RVQ0tJTkcgKSApXG4iICsgVCoyICsgInJldHVybiBmYWxzZTtcblxuIiArIFQgKyAi
+          Ly8gU3RpbGwgdXBkYXRpbmcgdGhlIGV5ZSBwb3NpdGlvbi4iLAogICAgVCArICJpZiAoICFzZF9o
+          bDFtb3ZlLkdldEJvb2woKSAmJiBwbGF5ZXItPm1fTG9jYWwubV9iRHVja2luZyAmJiAoICBwbGF5
+          ZXItPkdldEZsYWdzKCkgJiBGTF9EVUNLSU5HICkgKVxuIiArIFQqMiArICJyZXR1cm4gZmFsc2U7
+          XG5cbiIgKyBUICsgIi8vIFN0aWxsIHVwZGF0aW5nIHRoZSBleWUgcG9zaXRpb24uIikKIyAzKSBu
+          byBmb3J3YXJkIHNwZWVkIGNvcnJlY3Rpb24gb24ganVtcCAoaXQgY3V0IHNwZWVkIGFib3ZlIDEu
+          NXggbWF4IG9uIGV2ZXJ5IGhvcCkKcmVwKFQqMiArICJWZWN0b3JBZGQoICh2ZWNGb3J3YXJkKmZs
+          U3BlZWRBZGRpdGlvbiksIG12LT5tX3ZlY1ZlbG9jaXR5LCBtdi0+bV92ZWNWZWxvY2l0eSApOyIs
+          CiAgICBUKjIgKyAiaWYgKCAhc2RfaGwxbW92ZS5HZXRCb29sKCkgKVxuIiArIFQqMyArICJWZWN0
+          b3JBZGQoICh2ZWNGb3J3YXJkKmZsU3BlZWRBZGRpdGlvbiksIG12LT5tX3ZlY1ZlbG9jaXR5LCBt
+          di0+bV92ZWNWZWxvY2l0eSApOyIpCm9wZW4ocCwgInciKS53cml0ZShzKQpwcmludCgiZ2FtZW1v
+          dmVtZW50IHBhdGNoZWQiKQo=
+          GM_EOF
+          python3 /tmp/patch_gm.py
+          git -C engine diff --stat
+
+      - name: Build engine
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        env:
+          ENGINE_REF: ed8209cc35c61fbd8ddff8480962a01c981eef2f
+        run: bash scripts/build_engine.sh
+      - name: Build per-game client/server libraries (cstrike, episodic, portal, hl2mp)
+        if: ${{ inputs.with_engine }}
+        continue-on-error: true
+        working-directory: project
+        run: |
+          NDK="$PWD/.ndk/android-ndk-r10e"
+          export ANDROID_NDK_HOME="$NDK" NDK_HOME="$NDK"
+          STRIP=$(find "$NDK/toolchains/arm-linux-androideabi-4.9" -name 'arm-linux-androideabi-strip' | head -1)
+          PY="$(command -v python2 || command -v python3)"
+          cd engine
+          for g in cstrike episodic portal hl2mp; do
+            echo "=== game variant: $g"
+            touch /tmp/mark_$g; sleep 1
+            (
+              set -e
+              "$PY" ./waf configure -T release --android=armeabi-v7a-hard,4.9,21 --togles --disable-warns --build-games=$g
+              "$PY" ./waf build --targets=client,server
+              mkdir -p ../app/src/main/assets/gamelibs/$g
+              for n in client server; do
+                f=$(find build -name "lib$n.so" -newer /tmp/mark_$g | head -1)
+                [ -n "$f" ] || { echo "lib$n.so not built for $g"; exit 1; }
+                cp -v "$f" ../app/src/main/assets/gamelibs/$g/
+                "$STRIP" --strip-unneeded ../app/src/main/assets/gamelibs/$g/lib$n.so
+              done
+            ) || { echo "variant $g FAILED, skipping"; rm -rf ../app/src/main/assets/gamelibs/$g; }
+          done
+          ls -laR ../app/src/main/assets/gamelibs || true
+      - name: Symbolize call stack from bt.txt (if the file exists in the repo)
+        if: ${{ inputs.with_engine }}
+        run: |
+          [ -f bt.txt ] || [ -f oom_trace.txt ] || { echo "no bt.txt / oom_trace.txt, skipping"; exit 0; }
+          TOOL=$(find project/.ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-addr2line' | head -1)
+          python3 - "$TOOL" <<'PY'
+          import re, subprocess, sys, glob, os
+          tool = sys.argv[1]
+          lines = []
+          for fn in ("bt.txt", "oom_trace.txt"):
+              if os.path.exists(fn):
+                  lines += open(fn, errors="ignore").read().splitlines()
+          for line in lines:
+              m = re.match(r"\s*0x([0-9A-Fa-f]+):.*?(\S+\.so)\)", line)
+              if not m:
+                  continue
+              off, lib = int(m.group(1), 16), os.path.basename(m.group(2))
+              cands = glob.glob("project/engine/build/**/" + lib, recursive=True)
+              if not cands:
+                  print("NOLIB", lib, hex(off)); continue
+              a = (off & ~1) - 2
+              r = subprocess.run([tool, "-f", "-C", "-e", cands[0], hex(a)], capture_output=True, text=True)
+              print("SYM", lib, hex(off), "=>", " @ ".join(r.stdout.split("\n")[:2]))
+          PY
+
+      - name: Disable SDL HIDAPI (its native library is not built)
+        working-directory: project
+        run: |
+          F=engine/thirdparty/SDL-src/android-project/app/src/main/java/org/libsdl/app/HIDDeviceManager.java
+          sed -i 's/public static HIDDeviceManager acquire(Context context) {/public static HIDDeviceManager acquire(Context context) { if (true) return null;/' "$F"
+          grep -n "if (true) return null" "$F"
+      - name: Strip debug symbols from engine libraries
+        if: ${{ inputs.with_engine }}
+        working-directory: project
+        run: |
+          STRIP=$(find .ndk/android-ndk-r10e/toolchains/arm-linux-androideabi-4.9 -name 'arm-linux-androideabi-strip' | head -1)
+          echo "strip tool: $STRIP"
+          du -sh app/src/main/jniLibs
+          find app/src/main/jniLibs -name '*.so' -exec "$STRIP" --strip-unneeded {} \;
+          du -sh app/src/main/jniLibs
+      - name: Build APK
+        working-directory: project
+        run: |
+          sed -i '/^android {/a\    lint { checkReleaseBuilds = false; abortOnError = false }' app/build.gradle.kts
+          sed -i 's/compileSdk = 34/compileSdk = 35/; s/targetSdk = 34/targetSdk = 35/' app/build.gradle.kts
+          echo 'android.suppressUnsupportedCompileSdk=35' >> gradle.properties
+          grep -n 'compileSdk\|targetSdk' app/build.gradle.kts
+          gradle assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SourceDroid-apk
+          path: project/app/build/outputs/apk/release/*.apk
